@@ -107,9 +107,11 @@ def _source_needs_more_lines(source_code: str) -> bool:
         TokenType.IF,
         TokenType.WHEN,
         TokenType.DO,
+        TokenType.FOR,
     }
     open_block_count = 0
     open_parenthesis_count = 0
+    open_bracket_count = 0
 
     for token in tokens:
         if token.token_type in block_opening_types:
@@ -120,8 +122,16 @@ def _source_needs_more_lines(source_code: str) -> bool:
             open_parenthesis_count += 1
         elif token.token_type is TokenType.RIGHT_PARENTHESIS:
             open_parenthesis_count = max(0, open_parenthesis_count - 1)
+        elif token.token_type is TokenType.LEFT_BRACKET:
+            open_bracket_count += 1
+        elif token.token_type is TokenType.RIGHT_BRACKET:
+            open_bracket_count = max(0, open_bracket_count - 1)
 
-    return open_block_count > 0 or open_parenthesis_count > 0
+    return (
+        open_block_count > 0
+        or open_parenthesis_count > 0
+        or open_bracket_count > 0
+    )
 
 
 if __name__ == "__main__":

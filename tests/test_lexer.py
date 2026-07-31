@@ -49,6 +49,26 @@ class LexerTests(unittest.TestCase):
 
         self.assertEqual(tokens[0].literal, 'line one\n"line two"')
 
+    def test_lexer_recognizes_visibility_list_and_loop_tokens(self) -> None:
+        tokens = Lexer("pub for user in [users]\ncontinue\n").scan_tokens()
+
+        self.assertEqual(
+            [token.token_type for token in tokens],
+            [
+                TokenType.PUBLIC,
+                TokenType.FOR,
+                TokenType.IDENTIFIER,
+                TokenType.IN,
+                TokenType.LEFT_BRACKET,
+                TokenType.IDENTIFIER,
+                TokenType.RIGHT_BRACKET,
+                TokenType.NEWLINE,
+                TokenType.CONTINUE,
+                TokenType.NEWLINE,
+                TokenType.END_OF_FILE,
+            ],
+        )
+
     def test_lexer_error_contains_file_line_column_and_context(self) -> None:
         with self.assertRaises(LexerError) as caught_error:
             Lexer("name = @", "broken.hmr").scan_tokens()

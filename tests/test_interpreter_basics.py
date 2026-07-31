@@ -85,7 +85,7 @@ end
 """
             )
 
-        self.assertIn("1-argument overload", str(caught_error.exception))
+        self.assertIn("overload accepting the same arguments", str(caught_error.exception))
 
 
     def test_constants_cannot_be_reassigned(self) -> None:

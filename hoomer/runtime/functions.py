@@ -32,13 +32,52 @@ class RuntimeFunction:
         self.definition = definition
         self.closure_environment = closure_environment
         self.name = definition.name
-        self.parameter_names = definition.parameter_names
+        self.parameters = definition.parameters
+        self.parameter_names = [parameter.name for parameter in self.parameters]
         self.is_predicate = self.name.endswith("?")
         self.is_fallible = self.name.endswith("!")
 
     @property
     def arity(self) -> int:
-        return len(self.parameter_names)
+        return len(self.parameters)
+
+    @property
+    def positional_parameters(self) -> list[ast.FunctionParameterDefinition]:
+        return [parameter for parameter in self.parameters if not parameter.is_named]
+
+    @property
+    def named_parameters(self) -> list[ast.FunctionParameterDefinition]:
+        return [parameter for parameter in self.parameters if parameter.is_named]
+
+    def accepts_arguments(
+        self,
+        positional_argument_count: int,
+        named_argument_names: set[str],
+    ) -> bool:
+        required_positional_count = sum(
+            parameter.default_value is None
+            for parameter in self.positional_parameters
+        )
+        positional_count_is_valid = (
+            required_positional_count
+            <= positional_argument_count
+            <= len(self.positional_parameters)
+        )
+
+        allowed_named_names = {parameter.name for parameter in self.named_parameters}
+        required_named_names = {
+            parameter.name
+            for parameter in self.named_parameters
+            if parameter.default_value is None
+        }
+        named_names_are_known = named_argument_names.issubset(allowed_named_names)
+        required_names_are_present = required_named_names.issubset(named_argument_names)
+
+        return (
+            positional_count_is_valid
+            and named_names_are_known
+            and required_names_are_present
+        )
 
     def call(
         self,
@@ -47,14 +86,22 @@ class RuntimeFunction:
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> object:
-        argument_values = self._bind_arguments(
+        if not self.accepts_arguments(len(positional_arguments), set(named_arguments)):
+            self._raise_argument_error(positional_arguments, named_arguments, location)
+
+        call_environment = Environment(self.closure_environment)
+        self._bind_positional_parameters(
+            interpreter,
+            call_environment,
             positional_arguments,
+            location,
+        )
+        self._bind_named_parameters(
+            interpreter,
+            call_environment,
             named_arguments,
             location,
         )
-        call_environment = Environment(self.closure_environment)
-        for parameter_name, argument_value in argument_values.items():
-            call_environment.define(parameter_name, argument_value, location=location)
 
         returned_value = interpreter.execute_function_body(
             self.definition.body,
@@ -72,28 +119,39 @@ class RuntimeFunction:
 
         return returned_value
 
-    def _bind_arguments(
+    def _bind_positional_parameters(
         self,
+        interpreter: Interpreter,
+        call_environment: Environment,
         positional_arguments: list[object],
+        location: SourceLocation,
+    ) -> None:
+        for parameter_index, parameter in enumerate(self.positional_parameters):
+            if parameter_index < len(positional_arguments):
+                parameter_value = positional_arguments[parameter_index]
+            else:
+                parameter_value = interpreter.evaluate_expression(
+                    parameter.default_value,
+                    call_environment,
+                )
+            call_environment.define(parameter.name, parameter_value, location=location)
+
+    def _bind_named_parameters(
+        self,
+        interpreter: Interpreter,
+        call_environment: Environment,
         named_arguments: dict[str, object],
         location: SourceLocation,
-    ) -> dict[str, object]:
-        too_many_positional_arguments = len(positional_arguments) > self.arity
-        if too_many_positional_arguments:
-            self._raise_argument_error(positional_arguments, named_arguments, location)
-
-        bound_arguments = dict(zip(self.parameter_names, positional_arguments, strict=False))
-        for argument_name, argument_value in named_arguments.items():
-            name_is_unknown = argument_name not in self.parameter_names
-            name_was_already_positional = argument_name in bound_arguments
-            if name_is_unknown or name_was_already_positional:
-                self._raise_argument_error(positional_arguments, named_arguments, location)
-            bound_arguments[argument_name] = argument_value
-
-        if len(bound_arguments) != self.arity:
-            self._raise_argument_error(positional_arguments, named_arguments, location)
-
-        return bound_arguments
+    ) -> None:
+        for parameter in self.named_parameters:
+            if parameter.name in named_arguments:
+                parameter_value = named_arguments[parameter.name]
+            else:
+                parameter_value = interpreter.evaluate_expression(
+                    parameter.default_value,
+                    call_environment,
+                )
+            call_environment.define(parameter.name, parameter_value, location=location)
 
     def _raise_argument_error(
         self,
@@ -102,41 +160,72 @@ class RuntimeFunction:
         location: SourceLocation,
     ) -> None:
         supplied_count = len(positional_arguments) + len(named_arguments)
-        parameter_display = ", ".join(self.parameter_names)
         raise RuntimeHoomerError(
             location,
             f"Function `{self.name}` received arguments that do not match its parameters.",
-            expected=f"{self.arity} argument(s): ({parameter_display})",
-            found=f"{supplied_count} argument(s)",
+            expected=self.signature,
+            found=(
+                f"{len(positional_arguments)} positional and "
+                f"{len(named_arguments)} named argument(s) ({supplied_count} total)"
+            ),
         )
+
+    @property
+    def signature(self) -> str:
+        rendered_parameters: list[str] = []
+        for parameter in self.parameters:
+            rendered_name = parameter.name + (":" if parameter.is_named else "")
+            if parameter.default_value is not None:
+                rendered_name += " = <default>"
+            rendered_parameters.append(rendered_name)
+        return f"{self.name}({', '.join(rendered_parameters)})"
 
 
 class FunctionGroup:
-    """All definitions of one function name, selected by arity.
-
-    Hoomer intentionally uses one easy-to-explain overloading rule. ``greet()``
-    and ``greet(name)`` may coexist because their arities differ; two one-argument
-    definitions may not. Named arguments still have to match the parameter names
-    of the overload selected by its argument count.
-    """
+    """All definitions of one function name, selected by accepted arguments."""
 
     def __init__(self, name: str, first_overload: RuntimeFunction) -> None:
         self.name = name
         self.overloads: list[RuntimeFunction] = [first_overload]
 
     def add_overload(self, function: RuntimeFunction, location: SourceLocation) -> None:
-        arity_is_already_defined = any(
-            overload.arity == function.arity for overload in self.overloads
+        signature_overlaps = any(
+            self._signatures_overlap(overload, function)
+            for overload in self.overloads
         )
-        if arity_is_already_defined:
-            parameters = ", ".join(function.parameter_names)
+        if signature_overlaps:
             raise RuntimeHoomerError(
                 location,
-                f"Function `{self.name}` already has a {function.arity}-argument overload.",
-                expected="an overload with a different number of parameters",
-                found=f"`{self.name}({parameters})`",
+                f"Function `{self.name}` already has an overload accepting the same arguments.",
+                expected="an overload with a distinct positional count or named parameters",
+                found=function.signature,
             )
         self.overloads.append(function)
+
+    @staticmethod
+    def _signatures_overlap(
+        first_function: RuntimeFunction,
+        second_function: RuntimeFunction,
+    ) -> bool:
+        first_required_count = sum(
+            parameter.default_value is None
+            for parameter in first_function.positional_parameters
+        )
+        second_required_count = sum(
+            parameter.default_value is None
+            for parameter in second_function.positional_parameters
+        )
+        positional_ranges_overlap = (
+            first_required_count <= len(second_function.positional_parameters)
+            and second_required_count <= len(first_function.positional_parameters)
+        )
+        first_named_names = {
+            parameter.name for parameter in first_function.named_parameters
+        }
+        second_named_names = {
+            parameter.name for parameter in second_function.named_parameters
+        }
+        return positional_ranges_overlap and first_named_names == second_named_names
 
     def call(
         self,
@@ -145,12 +234,13 @@ class FunctionGroup:
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> object:
-        supplied_count = len(positional_arguments) + len(named_arguments)
         eligible_overloads = [
             overload
             for overload in self.overloads
-            if overload.arity == supplied_count
-            and set(named_arguments).issubset(overload.parameter_names)
+            if overload.accepts_arguments(
+                len(positional_arguments),
+                set(named_arguments),
+            )
         ]
 
         if len(eligible_overloads) == 1:
@@ -161,12 +251,17 @@ class FunctionGroup:
                 location,
             )
 
-        available_arities = ", ".join(str(overload.arity) for overload in self.overloads)
+        available_signatures = ", ".join(
+            overload.signature for overload in self.overloads
+        )
         raise RuntimeHoomerError(
             location,
             f"No overload of `{self.name}` matches these arguments.",
-            expected=f"one of the available arities: {available_arities}",
-            found=f"{supplied_count} argument(s)",
+            expected=f"one of: {available_signatures}",
+            found=(
+                f"{len(positional_arguments)} positional and "
+                f"{len(named_arguments)} named argument(s)"
+            ),
         )
 
 

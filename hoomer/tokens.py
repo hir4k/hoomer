@@ -15,6 +15,8 @@ class TokenType(Enum):
     RIGHT_PARENTHESIS = auto()
     LEFT_BRACE = auto()
     RIGHT_BRACE = auto()
+    LEFT_BRACKET = auto()
+    RIGHT_BRACKET = auto()
     COMMA = auto()
     DOT = auto()
     COLON = auto()
@@ -49,6 +51,10 @@ class TokenType(Enum):
     AS = auto()
     DO = auto()
     RETURN = auto()
+    PUBLIC = auto()
+    FOR = auto()
+    IN = auto()
+    CONTINUE = auto()
     TRUE = auto()
     FALSE = auto()
     NIL = auto()
@@ -70,6 +76,10 @@ KEYWORD_TOKEN_TYPES: dict[str, TokenType] = {
     "as": TokenType.AS,
     "do": TokenType.DO,
     "return": TokenType.RETURN,
+    "pub": TokenType.PUBLIC,
+    "for": TokenType.FOR,
+    "in": TokenType.IN,
+    "continue": TokenType.CONTINUE,
     "true": TokenType.TRUE,
     "false": TokenType.FALSE,
     "nil": TokenType.NIL,

@@ -5,24 +5,26 @@
 
 ## Try the interpreter
 
-Hoomer requires Python 3.12 or newer. From this repository, run the required
-MVP example with:
+Hoomer requires Python 3.12 or newer. From this repository, run the complete
+accounts/application example with:
 
 ```sh
-python -m hoomer.main run examples/user.hmr
+python -m hoomer.main run examples/run_application.hmr
 ```
 
-Expected output:
+The output starts with:
 
 ```text
-Hello Hirak
+Welcome Hirak!
+ID: 10
+Name: Hirak
 ```
 
 Install the local package to make the shorter command available:
 
 ```sh
 python -m pip install -e .
-hoomer run examples/user.hmr
+hoomer run examples/run_application.hmr
 hoomer repl
 ```
 
@@ -33,9 +35,11 @@ python -m unittest discover -v
 ```
 
 The MVP implements literals and interpolation, variables and constants,
-functions (including automatic return and arity overloads), structs, field
+functions (including automatic return, defaults, named parameters, and
+overloads), structs, field
 access and assignment, modules, imports, `if`/`elsif`, `when` matching, function
-markers, reflection, `do` blocks, source-aware errors, and an interactive REPL.
+markers, lists, `for` loops, `continue`, reflection, `do` blocks, source-aware
+errors, and an interactive REPL.
 
 ---
 
@@ -169,6 +173,9 @@ Modules contain:
 - Functions
 - Structs
 
+Functions and structs are private to their module unless their definition starts
+with `pub`. Module constants are available through their UPPER_SNAKE_CASE name.
+
 This is valid because every module-level statement is a declaration:
 
 Example:
@@ -179,19 +186,21 @@ module Accounts
 MAX_LOGIN_ATTEMPTS = 5
 
 
-struct User
+pub struct User
 
-    name = ""
-    email = ""
+    name,
+    email,
+    active=true,
 
 end
 
 
-fn create_user(name, email)
+pub fn create_user(name, email, active: = true)
 
     User(
-        name: name,
-        email: email
+        name=name,
+        email=email,
+        active=active,
     )
 
 end
@@ -208,7 +217,7 @@ This is invalid:
 ```hmr
 module Accounts
 
-user = User(name: "Hirak")
+user = User(name="Hirak")
 print user.name
 
 end
@@ -236,7 +245,7 @@ entry-point function: `hoomer run` evaluates the file from top to bottom.
 ```hmr
 module Greeting
 
-fn message()
+pub fn message()
     "Hello"
 end
 
@@ -334,9 +343,9 @@ Example:
 ```hmr
 struct User
 
-    name = ""
-    email = ""
-    active = true
+    name,
+    email,
+    active=true,
 
 end
 ```
@@ -345,8 +354,8 @@ Creating:
 
 ```hmr
 user = User(
-    name: "Hirak",
-    email: "hirak@example.com"
+    name="Hirak",
+    email="hirak@example.com",
 )
 ```
 
@@ -355,6 +364,11 @@ Structs support:
 - Default values
 - Named fields
 - Reflection
+
+Fields are comma-separated. A field without a default is required; a field with
+`=default` is optional. Construction always uses parentheses and `=` named
+fields—positional struct construction is invalid. Small definitions may stay on
+one line: `struct Point x, y end`.
 
 ---
 
@@ -450,7 +464,7 @@ Example:
 
 ```hmr
 DatabaseError(
-    message: "Connection failed"
+    message="Connection failed",
 )
 ```
 
@@ -611,6 +625,27 @@ fn greet(name)
 end
 ```
 
+Parameters may be positional or named, and either form may have a default:
+
+```hmr
+fn connect(
+    retries=3,
+    host:,
+    port: = 5432,
+)
+    # ...
+end
+
+connect(5, host="localhost")
+```
+
+Positional parameters always appear before named parameters. Calls use `=` for
+named arguments; `:` is reserved for declaring named parameters.
+
+Ordinary calls may omit parentheses when the call stays unambiguous on one
+line—`greet "Hirak"` and `greet("Hirak")` are equivalent. Struct construction
+always requires parentheses.
+
 The last expression is returned automatically.
 
 Explicit return is available:
@@ -633,7 +668,8 @@ end
 
 # 17. Function Overloading
 
-Functions can have multiple definitions based on arity.
+Functions can have multiple definitions when their accepted argument shapes do
+not overlap.
 
 Example:
 
@@ -712,7 +748,29 @@ Libraries build these.
 
 ---
 
-# 20. Reflection
+# 20. Lists and Loops
+
+List literals are comma-separated and may span lines. `for` visits each item;
+`continue` skips directly to the next one.
+
+```hmr
+users = [
+    User(name="Hirak"),
+    User(name="Rahul"),
+]
+
+for user in users
+    if user.active == false
+        continue
+    end
+
+    print user.name
+end
+```
+
+---
+
+# 21. Reflection
 
 Hoomer supports runtime reflection.
 
@@ -740,7 +798,7 @@ Reflection enables:
 
 ---
 
-# 21. Constants
+# 22. Constants
 
 Constants use UPPER_SNAKE_CASE.
 
@@ -755,7 +813,7 @@ Constants are immutable.
 
 ---
 
-# 22. State Philosophy
+# 23. State Philosophy
 
 Hoomer avoids hidden mutable state.
 
@@ -783,7 +841,7 @@ State is represented as data.
 
 ---
 
-# 23. Language Goals
+# 24. Language Goals
 
 Hoomer aims to combine:
 
@@ -802,7 +860,7 @@ while avoiding:
 
 ---
 
-# 24. MVP Interpreter
+# 25. MVP Interpreter
 
 The first implementation will be written in Python.
 
@@ -826,7 +884,7 @@ The first goal is proving:
 
 ---
 
-# 25. Final Vision
+# 26. Final Vision
 
 Hoomer is built around a simple belief:
 

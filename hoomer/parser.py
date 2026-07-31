@@ -56,20 +56,27 @@ class Parser:
         return expression
 
     def _parse_statement(self) -> ast.Statement:
+        if self._match(TokenType.PUBLIC):
+            return self._parse_public_definition()
         if self._match(TokenType.MODULE):
-            return self._parse_module_definition(self._previous())
+            return self._parse_module_definition(self._previous(), is_public=False)
         if self._match(TokenType.IMPORT):
             return self._parse_import(self._previous())
         if self._match(TokenType.STRUCT):
-            return self._parse_struct_definition(self._previous())
+            return self._parse_struct_definition(self._previous(), is_public=False)
         if self._match(TokenType.FUNCTION):
-            return self._parse_function_definition(self._previous())
+            return self._parse_function_definition(self._previous(), is_public=False)
         if self._match(TokenType.IF):
             return self._parse_if_statement(self._previous())
         if self._match(TokenType.WHEN):
             return self._parse_when_statement(self._previous())
         if self._match(TokenType.RETURN):
             return self._parse_return_statement(self._previous())
+        if self._match(TokenType.FOR):
+            return self._parse_for_statement(self._previous())
+        if self._match(TokenType.CONTINUE):
+            continue_token = self._previous()
+            return ast.ContinueStatement(continue_token.location)
 
         is_print_statement = (
             self._check(TokenType.IDENTIFIER) and self._peek().lexeme == "print"
@@ -86,9 +93,24 @@ class Parser:
 
         return ast.ExpressionStatement(expression.location, expression)
 
+    def _parse_public_definition(self) -> ast.Statement:
+        if self._match(TokenType.FUNCTION):
+            return self._parse_function_definition(self._previous(), is_public=True)
+        if self._match(TokenType.STRUCT):
+            return self._parse_struct_definition(self._previous(), is_public=True)
+
+        raise ParserError(
+            self._peek().location,
+            "`pub` can only expose a function or struct from its module.",
+            expected="`fn` or `struct`",
+            found=self._peek().describe(),
+        )
+
     def _parse_function_definition(
         self,
         function_token: Token,
+        *,
+        is_public: bool,
     ) -> ast.FunctionDefinition:
         name_token = self._consume(
             TokenType.IDENTIFIER,
@@ -103,18 +125,7 @@ class Parser:
             "`(`",
         )
 
-        parameter_names: list[str] = []
-        if not self._check(TokenType.RIGHT_PARENTHESIS):
-            while True:
-                parameter_token = self._consume(
-                    TokenType.IDENTIFIER,
-                    "Function parameters must be variable names.",
-                    "a snake_case parameter name",
-                )
-                validate_variable_name(parameter_token.lexeme, parameter_token.location)
-                parameter_names.append(parameter_token.lexeme)
-                if not self._match(TokenType.COMMA):
-                    break
+        parameters = self._parse_function_parameters(name_token.lexeme)
 
         self._consume(
             TokenType.RIGHT_PARENTHESIS,
@@ -128,13 +139,100 @@ class Parser:
         return ast.FunctionDefinition(
             function_token.location,
             name_token.lexeme,
-            parameter_names,
+            parameters,
             body,
+            is_public,
         )
+
+    def _parse_function_parameters(
+        self,
+        function_name: str,
+    ) -> list[ast.FunctionParameterDefinition]:
+        """Parse positional parameters first, followed by named parameters.
+
+        The four forms map directly to two independent facts:
+
+        * ``name`` is required and positional.
+        * ``name=default`` is optional and positional.
+        * ``name:`` is required and named.
+        * ``name: = default`` is optional and named.
+
+        Keeping those facts explicit avoids a compact marker encoding that every
+        later reader would have to memorize.
+        """
+
+        parameters: list[ast.FunctionParameterDefinition] = []
+        parameter_names: set[str] = set()
+        has_seen_named_parameter = False
+        has_seen_optional_positional_parameter = False
+        self._skip_newlines()
+
+        while not self._check(TokenType.RIGHT_PARENTHESIS):
+            parameter_token = self._consume(
+                TokenType.IDENTIFIER,
+                "Function parameters must be variable names.",
+                "a snake_case parameter name",
+            )
+            validate_variable_name(parameter_token.lexeme, parameter_token.location)
+            if parameter_token.lexeme in parameter_names:
+                raise ParserError(
+                    parameter_token.location,
+                    f"Function `{function_name}` declares `{parameter_token.lexeme}` more than once.",
+                    expected="a unique parameter name",
+                    found=parameter_token.lexeme,
+                )
+            parameter_names.add(parameter_token.lexeme)
+
+            is_named_parameter = self._match(TokenType.COLON)
+            if is_named_parameter:
+                has_seen_named_parameter = True
+            elif has_seen_named_parameter:
+                raise ParserError(
+                    parameter_token.location,
+                    "Positional parameters must appear before named parameters.",
+                    expected="a named parameter such as `age:`",
+                    found=parameter_token.lexeme,
+                )
+
+            default_value = None
+            if self._match(TokenType.ASSIGN):
+                default_value = self._parse_expression()
+
+            is_optional_positional = not is_named_parameter and default_value is not None
+            is_required_positional = not is_named_parameter and default_value is None
+            if is_required_positional and has_seen_optional_positional_parameter:
+                raise ParserError(
+                    parameter_token.location,
+                    "A required positional parameter cannot follow an optional one.",
+                    expected="required positional parameters before parameters with defaults",
+                    found=parameter_token.lexeme,
+                )
+            if is_optional_positional:
+                has_seen_optional_positional_parameter = True
+
+            parameters.append(
+                ast.FunctionParameterDefinition(
+                    parameter_token.lexeme,
+                    parameter_token.location,
+                    is_named_parameter,
+                    default_value,
+                )
+            )
+
+            self._skip_newlines()
+            if not self._match(TokenType.COMMA):
+                break
+            self._skip_newlines()
+            if self._check(TokenType.RIGHT_PARENTHESIS):
+                break
+
+        return parameters
 
     def _parse_struct_definition(
         self,
         struct_token: Token,
+        *,
+        is_public: bool,
     ) -> ast.StructDefinition:
         name_token = self._consume(
             TokenType.IDENTIFIER,
@@ -142,9 +240,9 @@ class Parser:
             "a PascalCase struct name",
         )
         validate_struct_name(name_token.lexeme, name_token.location)
-        self._require_line_after_header("struct definition")
 
         fields: list[ast.StructFieldDefinition] = []
+        field_names: set[str] = set()
         self._skip_newlines()
         while not self._check(TokenType.END) and not self._is_at_end():
             field_token = self._consume(
@@ -153,25 +251,57 @@ class Parser:
                 "a snake_case field name or `end`",
             )
             validate_field_name(field_token.lexeme, field_token.location)
+            if field_token.lexeme in field_names:
+                raise ParserError(
+                    field_token.location,
+                    f"Struct `{name_token.lexeme}` declares `{field_token.lexeme}` more than once.",
+                    expected="a unique field name",
+                    found=field_token.lexeme,
+                )
+            field_names.add(field_token.lexeme)
 
             default_value = None
             if self._match(TokenType.ASSIGN):
                 default_value = self._parse_expression()
 
             fields.append(ast.StructFieldDefinition(field_token.lexeme, field_token.location, default_value))
-            self._finish_statement()
-            self._skip_newlines()
+
+            if self._match(TokenType.COMMA):
+                self._skip_newlines()
+                continue
+
+            if self._match(TokenType.NEWLINE):
+                self._skip_newlines()
+                if self._check(TokenType.END):
+                    break
+                raise ParserError(
+                    self._peek().location,
+                    "Struct fields must be separated by commas.",
+                    expected="`,` after the previous field",
+                    found=self._peek().describe(),
+                )
+
+            if not self._check(TokenType.END):
+                raise ParserError(
+                    self._peek().location,
+                    "Struct fields must be separated by commas.",
+                    expected="`,` or `end`",
+                    found=self._peek().describe(),
+                )
 
         self._consume(TokenType.END, "This struct is missing its closing `end`.", "`end`")
         return ast.StructDefinition(
             struct_token.location,
             name_token.lexeme,
             fields,
+            is_public,
         )
 
     def _parse_module_definition(
         self,
         module_token: Token,
+        *,
+        is_public: bool,
     ) -> ast.ModuleDefinition:
         name_tokens = self._parse_dotted_name(
             "Every module needs a PascalCase name after `module`."
@@ -187,6 +317,7 @@ class Parser:
             module_token.location,
             [name_token.lexeme for name_token in name_tokens],
             body,
+            is_public,
         )
 
     def _validate_module_contains_definitions_only(
@@ -310,6 +441,29 @@ class Parser:
         self._consume(TokenType.END, "This `if` expression is missing its closing `end`.", "`end`")
         return ast.IfStatement(if_token.location, branches, else_body)
 
+    def _parse_for_statement(self, for_token: Token) -> ast.ForStatement:
+        item_token = self._consume(
+            TokenType.IDENTIFIER,
+            "A `for` loop needs a variable for its current item.",
+            "a snake_case variable name",
+        )
+        validate_variable_name(item_token.lexeme, item_token.location)
+        self._consume(
+            TokenType.IN,
+            "The loop variable must be followed by `in`.",
+            "`in`",
+        )
+        iterable_expression = self._parse_expression()
+        self._require_line_after_header("for loop")
+        body = self._parse_block_until(lambda: self._check(TokenType.END))
+        self._consume(TokenType.END, "This `for` loop is missing its closing `end`.", "`end`")
+        return ast.ForStatement(
+            for_token.location,
+            item_token.lexeme,
+            iterable_expression,
+            body,
+        )
+
     def _parse_when_statement(self, when_token: Token) -> ast.WhenStatement:
         matched_expression = self._parse_expression()
         binding_name = None
@@ -325,11 +479,16 @@ class Parser:
         self._require_line_after_header("when expression")
         branches: list[ast.WhenBranch] = []
         self._skip_newlines()
+        pattern_column: int | None = None
 
         while not self._check(TokenType.END) and not self._is_at_end():
+            if pattern_column is None:
+                pattern_column = self._peek().location.column
             pattern = self._parse_when_pattern()
             self._require_line_after_header("when pattern")
-            branch_body = self._parse_block_until(self._starts_when_pattern_or_end)
+            branch_body = self._parse_block_until(
+                lambda: self._starts_when_pattern_or_end(pattern_column)
+            )
             branches.append(ast.WhenBranch(pattern, branch_body))
 
         self._consume(TokenType.END, "This `when` expression is missing its closing `end`.", "`end`")
@@ -340,29 +499,75 @@ class Parser:
             return ast.NilPattern(self._previous().location)
         if self._match(TokenType.WILDCARD):
             return ast.WildcardPattern(self._previous().location)
+        if self._match(TokenType.STRING, TokenType.NUMBER):
+            literal_token = self._previous()
+            return ast.LiteralPattern(literal_token.literal, literal_token.location)
+        if self._match(TokenType.TRUE):
+            return ast.LiteralPattern(True, self._previous().location)
+        if self._match(TokenType.FALSE):
+            return ast.LiteralPattern(False, self._previous().location)
         if self._check(TokenType.IDENTIFIER):
-            pattern_token = self._advance()
-            validate_struct_name(pattern_token.lexeme, pattern_token.location)
-            return ast.StructPattern(pattern_token.lexeme, pattern_token.location)
+            name_tokens = self._parse_dotted_name(
+                "A struct pattern must contain a struct name."
+            )
+            for module_token in name_tokens[:-1]:
+                validate_module_name(module_token.lexeme, module_token.location)
+            struct_token = name_tokens[-1]
+            validate_struct_name(struct_token.lexeme, struct_token.location)
+            return ast.StructPattern(
+                [name_token.lexeme for name_token in name_tokens],
+                name_tokens[0].location,
+            )
 
         raise ParserError(
             self._peek().location,
-            "A `when` branch must begin with a struct, `nil`, or the `_` wildcard.",
-            expected="a pattern such as `User`, `nil`, or `_`",
+            "A `when` branch must begin with a struct, literal, `nil`, or `_`.",
+            expected="a pattern such as `Accounts.User`, `\"Guwahati\"`, `nil`, or `_`",
             found=self._peek().describe(),
         )
 
-    def _starts_when_pattern_or_end(self) -> bool:
+    def _starts_when_pattern_or_end(self, pattern_column: int) -> bool:
         if self._check(TokenType.END):
             return True
-        if self._check_any(TokenType.NIL, TokenType.WILDCARD):
+        if self._peek().location.column != pattern_column:
+            return False
+
+        single_token_patterns = {
+            TokenType.NIL,
+            TokenType.WILDCARD,
+            TokenType.STRING,
+            TokenType.NUMBER,
+            TokenType.TRUE,
+            TokenType.FALSE,
+        }
+        if self._check_any(*single_token_patterns):
             return self._peek_next().token_type is TokenType.NEWLINE
         if not self._check(TokenType.IDENTIFIER):
             return False
 
-        is_pascal_case_name = PASCAL_CASE_PATTERN.fullmatch(self._peek().lexeme) is not None
-        is_the_only_token_on_line = self._peek_next().token_type is TokenType.NEWLINE
-        return is_pascal_case_name and is_the_only_token_on_line
+        # A qualified type pattern is an alternating sequence such as
+        # ``Accounts . User`` that occupies its whole line. Checking the token
+        # sequence here avoids mistaking ``Accounts.find_user()`` in a branch
+        # body for the beginning of the next pattern.
+        token_index = self.current_index
+        expects_identifier = True
+        while token_index < len(self.tokens):
+            token = self.tokens[token_index]
+            if expects_identifier and token.token_type is TokenType.IDENTIFIER:
+                if PASCAL_CASE_PATTERN.fullmatch(token.lexeme) is None:
+                    return False
+                expects_identifier = False
+                token_index += 1
+                continue
+            if not expects_identifier and token.token_type is TokenType.DOT:
+                expects_identifier = True
+                token_index += 1
+                continue
+            break
+
+        complete_name = not expects_identifier
+        ends_at_newline = self.tokens[token_index].token_type is TokenType.NEWLINE
+        return complete_name and ends_at_newline
 
     def _parse_return_statement(self, return_token: Token) -> ast.ReturnStatement:
         return_has_no_value = self._check_any(
@@ -415,7 +620,7 @@ class Parser:
     def _parse_assignment(self) -> ast.Expression:
         assignment_target = self._parse_equality()
         if not self._match(TokenType.ASSIGN):
-            return assignment_target
+            return self._parse_parenthesis_free_call(assignment_target)
 
         assignment_operator = self._previous()
         assigned_value = self._parse_assignment()
@@ -439,6 +644,81 @@ class Parser:
             assignment_target,
             assigned_value,
         )
+
+    def _parse_parenthesis_free_call(
+        self,
+        callable_expression: ast.Expression,
+    ) -> ast.Expression:
+        """Parse an unambiguous same-line call such as ``greet "Hirak"``.
+
+        The call must contain at least one argument; ``greet`` alone remains a
+        reference to the function value. Arguments cannot continue after a
+        newline without parentheses. These two constraints keep variables and
+        the next statement from being silently consumed as part of a call.
+        """
+
+        if not isinstance(
+            callable_expression,
+            (ast.VariableExpression, ast.FieldAccessExpression),
+        ):
+            return callable_expression
+        if not self._token_can_start_expression(self._peek()):
+            return callable_expression
+
+        arguments: list[ast.CallArgument] = []
+        encountered_named_argument = False
+        while True:
+            argument_name = None
+            begins_named_argument = (
+                self._check(TokenType.IDENTIFIER)
+                and self._peek_next().token_type is TokenType.ASSIGN
+            )
+            if begins_named_argument:
+                argument_token = self._advance()
+                argument_name = argument_token.lexeme
+                validate_variable_name(argument_name, argument_token.location)
+                self._advance()
+                encountered_named_argument = True
+            elif encountered_named_argument:
+                raise ParserError(
+                    self._peek().location,
+                    "A positional argument cannot follow a named argument.",
+                    expected="all positional arguments before named arguments",
+                    found=self._peek().describe(),
+                )
+
+            argument_value = self._parse_assignment()
+            arguments.append(ast.CallArgument(argument_value, argument_name))
+            if not self._match(TokenType.COMMA):
+                break
+            if not self._token_can_start_expression(self._peek()):
+                raise ParserError(
+                    self._peek().location,
+                    "A parenthesis-free call cannot continue onto another line.",
+                    expected="another argument on the same line",
+                    found=self._peek().describe(),
+                )
+
+        return ast.CallExpression(
+            callable_expression.location,
+            callable_expression,
+            arguments,
+            uses_parentheses=False,
+        )
+
+    @staticmethod
+    def _token_can_start_expression(token: Token) -> bool:
+        return token.token_type in {
+            TokenType.FALSE,
+            TokenType.TRUE,
+            TokenType.NIL,
+            TokenType.NUMBER,
+            TokenType.STRING,
+            TokenType.IDENTIFIER,
+            TokenType.LEFT_PARENTHESIS,
+            TokenType.LEFT_BRACKET,
+            TokenType.MINUS,
+        }
 
     def _parse_equality(self) -> ast.Expression:
         expression = self._parse_comparison()
@@ -542,11 +822,12 @@ class Parser:
                 argument_name = None
                 begins_named_argument = (
                     self._check(TokenType.IDENTIFIER)
-                    and self._peek_next().token_type is TokenType.COLON
+                    and self._peek_next().token_type is TokenType.ASSIGN
                 )
                 if begins_named_argument:
                     argument_name = self._advance().lexeme
-                    self._advance()  # The lookahead above already proved this is `:`.
+                    validate_variable_name(argument_name, self._previous().location)
+                    self._advance()  # The lookahead above already proved this is `=`.
 
                 argument_value = self._parse_expression()
                 arguments.append(ast.CallArgument(argument_value, argument_name))
@@ -555,6 +836,8 @@ class Parser:
                 if not self._match(TokenType.COMMA):
                     break
                 self._skip_newlines()
+                if self._check(TokenType.RIGHT_PARENTHESIS):
+                    break
 
         self._consume(
             TokenType.RIGHT_PARENTHESIS,
@@ -576,6 +859,8 @@ class Parser:
         if self._match(TokenType.IDENTIFIER):
             identifier_token = self._previous()
             return ast.VariableExpression(identifier_token.location, identifier_token.lexeme)
+        if self._match(TokenType.LEFT_BRACKET):
+            return self._parse_list_expression(self._previous())
         if self._match(TokenType.LEFT_PARENTHESIS):
             opening_parenthesis = self._previous()
             expression = self._parse_expression()
@@ -592,6 +877,27 @@ class Parser:
             expected="an expression",
             found=self._peek().describe(),
         )
+
+    def _parse_list_expression(self, opening_bracket: Token) -> ast.ListExpression:
+        items: list[ast.Expression] = []
+        self._skip_newlines()
+
+        while not self._check(TokenType.RIGHT_BRACKET):
+            items.append(self._parse_expression())
+            self._skip_newlines()
+
+            if not self._match(TokenType.COMMA):
+                break
+            self._skip_newlines()
+            if self._check(TokenType.RIGHT_BRACKET):
+                break
+
+        self._consume(
+            TokenType.RIGHT_BRACKET,
+            "This list is missing its closing bracket.",
+            "`]`",
+        )
+        return ast.ListExpression(opening_bracket.location, items)
 
     def _parse_dotted_name(self, explanation: str) -> list[Token]:
         first_name = self._consume(TokenType.IDENTIFIER, explanation, "a name")

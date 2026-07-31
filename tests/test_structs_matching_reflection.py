@@ -9,11 +9,11 @@ class StructMatchingReflectionTests(unittest.TestCase):
     def test_struct_defaults_named_construction_field_access_and_assignment(self) -> None:
         _, output, _ = run_hoomer(
             """struct User
-    name = "Unknown"
-    age = 0
+    name="Unknown",
+    age=0,
 end
 
-user = User(age: 26)
+user = User(age=26)
 print user.name
 user.name = "Hirak"
 print user.name
@@ -26,7 +26,7 @@ print user.name
     def test_when_matches_struct_nil_and_wildcard_top_to_bottom(self) -> None:
         _, output, _ = run_hoomer(
             """struct User
-    name = ""
+    name="",
 end
 
 fn describe(value)
@@ -40,7 +40,7 @@ fn describe(value)
     end
 end
 
-print describe(User(name: "Hirak"))
+print describe(User(name="Hirak"))
 print describe(nil)
 print describe(42)
 """
@@ -52,10 +52,10 @@ print describe(42)
     def test_error_structs_are_ordinary_values_matched_by_type(self) -> None:
         _, output, _ = run_hoomer(
             """struct DatabaseError
-    message
+    message,
 end
 
-result = DatabaseError(message: "Connection failed")
+result = DatabaseError(message="Connection failed")
 
 when result as response
     DatabaseError
@@ -72,15 +72,15 @@ end
     def test_reflection_exposes_struct_and_function_information(self) -> None:
         _, output, _ = run_hoomer(
             """struct User
-    name = ""
-    age = 0
+    name="",
+    age=0,
 end
 
 fn greet(user)
     "Hello {user.name}"
 end
 
-user_info = reflect(User(name: "Hirak"))
+user_info = reflect(User(name="Hirak"))
 function_info = reflect(greet)
 print user_info.name
 print user_info.fields

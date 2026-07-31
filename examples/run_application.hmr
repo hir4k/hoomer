@@ -1,0 +1,15 @@
+import Application
+import Example
+
+Application.run()
+
+
+print "======================"
+
+user = Example.User(
+    name="Hirakjyoti Das 😍",
+    age=26,
+)
+
+message = Example.greet(user, from="Baruapara")
+print message

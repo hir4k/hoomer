@@ -50,7 +50,7 @@ class RuntimeStructDefinition:
             raise RuntimeHoomerError(
                 location,
                 f"Struct `{self.name}` is constructed with named fields.",
-                expected=f"`{self.name}(field_name: value)`",
+                expected=f"`{self.name}(field_name=value)`",
                 found=f"{len(positional_arguments)} positional argument(s)",
             )
 
@@ -66,11 +66,22 @@ class RuntimeStructDefinition:
             )
 
         instance_fields: OrderedDict[str, object] = OrderedDict()
+        missing_required_fields = [
+            field.name
+            for field in self.fields
+            if field.default_expression is None and field.name not in named_arguments
+        ]
+        if missing_required_fields:
+            raise RuntimeHoomerError(
+                location,
+                f"Struct `{self.name}` is missing required fields.",
+                expected="named values for: " + ", ".join(missing_required_fields),
+                found="no value for: " + ", ".join(missing_required_fields),
+            )
+
         for field_definition in self.fields:
             if field_definition.name in named_arguments:
                 field_value = named_arguments[field_definition.name]
-            elif field_definition.default_expression is None:
-                field_value = None
             else:
                 field_value = interpreter.evaluate_expression(
                     field_definition.default_expression,
@@ -108,4 +119,3 @@ class RuntimeStructInstance:
 
         self.fields[field_name] = value
         return value
-

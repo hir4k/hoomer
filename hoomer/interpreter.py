@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -30,6 +31,10 @@ from hoomer.runtime.structs import (
 from hoomer.runtime.values import format_runtime_value, is_truthy, runtime_type_name
 
 
+class ContinueLoop(Exception):
+    """Internal control-flow signal consumed by the nearest running loop."""
+
+
 class Interpreter:
     """Own runtime state and evaluate Hoomer AST nodes.
 
@@ -55,6 +60,7 @@ class Interpreter:
         self._files_being_loaded: set[Path] = set()
         self._loaded_files: set[Path] = set()
         self._function_call_depth = 0
+        self._loop_depth = 0
         self._install_builtins()
 
     @classmethod
@@ -129,13 +135,20 @@ class Interpreter:
         statements: list[ast.Statement],
         environment: Environment,
     ) -> object:
+        enclosing_loop_depth = self._loop_depth
         self._function_call_depth += 1
+        # A loop inside the caller is not a loop inside the called function.
+        # Resetting the depth prevents ``continue`` in a helper from silently
+        # continuing its caller's loop; loops created by the function increment
+        # this fresh depth normally.
+        self._loop_depth = 0
         try:
             try:
                 return self.execute_statements(statements, environment)
             except ReturnFromFunction as return_signal:
                 return return_signal.value
         finally:
+            self._loop_depth = enclosing_loop_depth
             self._function_call_depth -= 1
 
     def execute_statements(
@@ -162,7 +175,11 @@ class Interpreter:
                 if isinstance(assignment_expression, ast.AssignmentExpression):
                     assignment_target = assignment_expression.target
                     if isinstance(assignment_target, ast.VariableExpression):
-                        active_module.register_member(assignment_target.name)
+                        # Constants are the one module declaration without a
+                        # separate ``pub`` form. Their UPPER_SNAKE_CASE name is
+                        # already explicit, so declaring one makes it available
+                        # as ``Module.CONSTANT_NAME`` automatically.
+                        active_module.make_public(assignment_target.name)
             return expression_value
 
         if isinstance(statement, ast.PrintStatement):
@@ -203,6 +220,19 @@ class Interpreter:
         if isinstance(statement, ast.WhenStatement):
             return self._execute_when(statement, environment, active_module)
 
+        if isinstance(statement, ast.ForStatement):
+            return self._execute_for(statement, environment, active_module)
+
+        if isinstance(statement, ast.ContinueStatement):
+            if self._loop_depth == 0:
+                raise RuntimeHoomerError(
+                    statement.location,
+                    "`continue` can only be used inside a `for` loop.",
+                    expected="`continue` between `for ... in ...` and its `end`",
+                    found="`continue` outside a loop",
+                )
+            raise ContinueLoop()
+
         raise RuntimeHoomerError(
             statement.location,
             f"The interpreter does not know how to execute {type(statement).__name__}.",
@@ -239,6 +269,12 @@ class Interpreter:
 
         if isinstance(expression, ast.BlockExpression):
             return RuntimeBlock(expression, environment)
+
+        if isinstance(expression, ast.ListExpression):
+            return [
+                self.evaluate_expression(item, environment)
+                for item in expression.items
+            ]
 
         raise RuntimeHoomerError(
             expression.location,
@@ -284,6 +320,8 @@ class Interpreter:
 
         if active_module is not None:
             active_module.register_member(definition.name)
+            if definition.is_public:
+                active_module.make_public(definition.name)
         return stored_function
 
     def _define_struct(
@@ -309,6 +347,8 @@ class Interpreter:
         )
         if active_module is not None:
             active_module.register_member(definition.name)
+            if definition.is_public:
+                active_module.make_public(definition.name)
         return runtime_struct
 
     def _execute_module_definition(self, definition: ast.ModuleDefinition) -> RuntimeModule:
@@ -339,17 +379,27 @@ class Interpreter:
 
             for selected_name in statement.selected_names:
                 imported_value = source_module.get_member(selected_name, statement.location)
-                environment.define(selected_name, imported_value, location=statement.location)
+                self._bind_imported_name(
+                    environment,
+                    selected_name,
+                    imported_value,
+                    statement.location,
+                )
             return source_module
 
         # A dotted import has two useful interpretations. If the entire path is
         # a module, ``import Accounts.User`` binds that nested module. Otherwise
-        # it binds member ``User`` from module ``Accounts``. Trying the
+        # it binds public member ``User`` from module ``Accounts``. Trying the
         # exact module first preserves both forms without adding new syntax.
         exact_module = self.module_registry.get(statement.name_path)
         if exact_module is not None:
             local_name = statement.alias or statement.name_path[-1]
-            environment.define(local_name, exact_module, location=statement.location)
+            self._bind_imported_name(
+                environment,
+                local_name,
+                exact_module,
+                statement.location,
+            )
             return exact_module
 
         parent_path = statement.name_path[:-1]
@@ -359,14 +409,40 @@ class Interpreter:
             raise RuntimeHoomerError(
                 statement.location,
                 f"Could not resolve import `{'.'.join(statement.name_path)}`.",
-                expected="a module or member available on the module search path",
+                expected="a module or public member available on the module search path",
                 found=".".join(statement.name_path),
             )
 
         imported_value = parent_module.get_member(member_name, statement.location)
         local_name = statement.alias or member_name
-        environment.define(local_name, imported_value, location=statement.location)
+        self._bind_imported_name(
+            environment,
+            local_name,
+            imported_value,
+            statement.location,
+        )
         return imported_value
+
+    @staticmethod
+    def _bind_imported_name(
+        environment: Environment,
+        local_name: str,
+        imported_value: object,
+        location: SourceLocation,
+    ) -> None:
+        """Bind an import, accepting a registry-created identical module binding.
+
+        Loading ``Application`` creates the root module in the global namespace
+        before the import statement finishes. The import should reuse that same
+        object, not report a duplicate name. A genuinely different existing
+        value still goes through ``Environment.define`` and receives its normal
+        collision diagnostic.
+        """
+
+        existing_value = environment.get_local(local_name)
+        if environment.has_local(local_name) and existing_value is imported_value:
+            return
+        environment.define(local_name, imported_value, location=location)
 
     def _execute_if(
         self,
@@ -414,6 +490,46 @@ class Interpreter:
 
         return None
 
+    def _execute_for(
+        self,
+        statement: ast.ForStatement,
+        environment: Environment,
+        active_module: RuntimeModule | None,
+    ) -> object:
+        iterable_value = self.evaluate_expression(
+            statement.iterable_expression,
+            environment,
+        )
+        if not isinstance(iterable_value, list):
+            raise RuntimeHoomerError(
+                statement.iterable_expression.location,
+                "A `for` loop currently iterates over a list.",
+                expected="a list such as `[first, second]`",
+                found=runtime_type_name(iterable_value),
+            )
+
+        last_value: object = None
+        self._loop_depth += 1
+        try:
+            for item_value in iterable_value:
+                iteration_environment = Environment(environment)
+                iteration_environment.define(
+                    statement.item_name,
+                    item_value,
+                    location=statement.location,
+                )
+                try:
+                    last_value = self.execute_statements(
+                        statement.body,
+                        iteration_environment,
+                        active_module,
+                    )
+                except ContinueLoop:
+                    continue
+        finally:
+            self._loop_depth -= 1
+        return last_value
+
     def _pattern_matches(
         self,
         pattern: ast.WhenPattern,
@@ -424,13 +540,20 @@ class Interpreter:
             return True
         if isinstance(pattern, ast.NilPattern):
             return matched_value is None
+        if isinstance(pattern, ast.LiteralPattern):
+            return matched_value == pattern.value
         if isinstance(pattern, ast.StructPattern):
-            expected_struct = environment.get(pattern.struct_name, pattern.location)
+            expected_struct = self._resolve_pattern_name_path(
+                pattern.name_path,
+                pattern.location,
+                environment,
+            )
             if not isinstance(expected_struct, RuntimeStructDefinition):
+                pattern_name = ".".join(pattern.name_path)
                 raise RuntimeHoomerError(
                     pattern.location,
-                    f"Pattern `{pattern.struct_name}` does not name a struct.",
-                    expected="a struct name, `nil`, or `_`",
+                    f"Pattern `{pattern_name}` does not name a struct.",
+                    expected="a struct name, literal, `nil`, or `_`",
                     found=runtime_type_name(expected_struct),
                 )
             return (
@@ -438,6 +561,25 @@ class Interpreter:
                 and matched_value.definition is expected_struct
             )
         return False
+
+    def _resolve_pattern_name_path(
+        self,
+        name_path: list[str],
+        location: SourceLocation,
+        environment: Environment,
+    ) -> object:
+        resolved_value = environment.get(name_path[0], location)
+        for member_name in name_path[1:]:
+            if not isinstance(resolved_value, RuntimeModule):
+                resolved_prefix = ".".join(name_path[:-1])
+                raise RuntimeHoomerError(
+                    location,
+                    f"`{resolved_prefix}` is not a module in this pattern.",
+                    expected="a qualified struct name such as `Accounts.User`",
+                    found=runtime_type_name(resolved_value),
+                )
+            resolved_value = resolved_value.get_member(member_name, location)
+        return resolved_value
 
     def _evaluate_unary(
         self,
@@ -543,6 +685,16 @@ class Interpreter:
         environment: Environment,
     ) -> object:
         callable_value = self.evaluate_expression(expression.callable_expression, environment)
+        if (
+            not expression.uses_parentheses
+            and isinstance(callable_value, RuntimeStructDefinition)
+        ):
+            raise RuntimeHoomerError(
+                expression.location,
+                f"Struct `{callable_value.name}` construction always requires parentheses.",
+                expected=f"`{callable_value.name}(field_name=value)`",
+                found="a parenthesis-free struct call",
+            )
         positional_arguments: list[object] = []
         named_arguments: dict[str, object] = {}
         encountered_named_argument = False
@@ -697,9 +849,13 @@ class Interpreter:
             return
 
         relative_candidates = [Path(*name_path).with_suffix(".hmr")]
+        snake_case_path = [self._module_name_to_file_name(name) for name in name_path]
+        relative_candidates.append(Path(*snake_case_path).with_suffix(".hmr"))
         if len(name_path) > 1:
             relative_candidates.append(Path(*name_path[:-1]).with_suffix(".hmr"))
+            relative_candidates.append(Path(*snake_case_path[:-1]).with_suffix(".hmr"))
         relative_candidates.append(Path(name_path[0]).with_suffix(".hmr"))
+        relative_candidates.append(Path(snake_case_path[0]).with_suffix(".hmr"))
 
         # Preserve candidate order while removing duplicates. The most specific
         # file wins: importing ``Accounts.User`` first tries
@@ -724,6 +880,21 @@ class Interpreter:
             expected="a loaded module or one of:\n    " + "\n    ".join(searched_locations),
             found="no matching .hmr file",
         )
+
+    @staticmethod
+    def _module_name_to_file_name(module_name: str) -> str:
+        """Map ``LoginService`` to the conventional ``login_service`` filename."""
+
+        words_separated_before_capitals = re.sub(
+            r"(.)([A-Z][a-z]+)",
+            r"\1_\2",
+            module_name,
+        )
+        return re.sub(
+            r"([a-z0-9])([A-Z])",
+            r"\1_\2",
+            words_separated_before_capitals,
+        ).lower()
 
     def _execute_import_file(self, source_path: Path, location: SourceLocation) -> None:
         if source_path in self._loaded_files:
@@ -758,7 +929,7 @@ class Interpreter:
         ]
         for function in text_functions:
             text_environment.define(function.name, function, is_mutable=False)
-            text_module.register_member(function.name)
+            text_module.make_public(function.name)
         self.module_registry.register_builtin(text_module)
 
     def _native_reflect(

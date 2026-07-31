@@ -13,11 +13,11 @@ class ModulesAndImportsTests(unittest.TestCase):
     def test_module_functions_are_available_through_the_namespace(self) -> None:
         _, output, _ = run_hoomer(
             """module Accounts
-    fn login()
+    pub fn login()
         "logged in"
     end
 
-    fn logout()
+    pub fn logout()
         "logged out"
     end
 end
@@ -34,8 +34,8 @@ print Accounts.logout()
             temporary_path = Path(temporary_directory)
             (temporary_path / "Accounts.hmr").write_text(
                 """module Accounts
-    struct Teacher
-        name = ""
+    pub struct Teacher
+        name="",
     end
 end
 """,
@@ -44,8 +44,8 @@ end
             application_source = """module Application
     import Accounts.Teacher as TeacherAccount
 
-    fn show_teacher()
-        teacher = TeacherAccount(name: "Hirak")
+    pub fn show_teacher()
+        teacher = TeacherAccount(name="Hirak")
         print teacher.name
     end
 end
@@ -68,7 +68,7 @@ Application.show_teacher()
         trim,
         lowercase
 
-    fn show_cleaned_name()
+    pub fn show_cleaned_name()
         cleaned_name = trim("  HIRAK  ")
         print lowercase(cleaned_name)
     end
@@ -84,10 +84,10 @@ Application.show_cleaned_name()
     def test_module_reflection_lists_functions_and_structs(self) -> None:
         _, output, _ = run_hoomer(
             """module Accounts
-    struct User
-        name
+    pub struct User
+        name,
     end
-    fn find_user()
+    pub fn find_user()
         nil
     end
 end
@@ -108,12 +108,12 @@ print module_info.structs
     MAX_LOGIN_ATTEMPTS = 5
 
     struct User
-        name = ""
-        email = ""
+        name="",
+        email="",
     end
 
     fn create_user(name, email)
-        User(name: trim(name), email: email)
+        User(name=trim(name), email=email)
     end
 end
 
@@ -134,7 +134,7 @@ print Accounts.MAX_LOGIN_ATTEMPTS
         source_code = """module Accounts
     MAX_LOGIN_ATTEMPTS = 5
 
-    user = User(name: "Hirak")
+    user = User(name="Hirak")
 end
 """
         interpreter = Interpreter()
@@ -169,7 +169,7 @@ end
             run_hoomer(invalid_source)
 
         valid_source = """module Accounts
-    fn show_name(name)
+    pub fn show_name(name)
         print name
     end
 end

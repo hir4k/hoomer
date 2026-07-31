@@ -62,6 +62,7 @@ class CallArgument:
 class CallExpression(Expression):
     callable_expression: Expression
     arguments: list[CallArgument]
+    uses_parentheses: bool = True
 
 
 @dataclass(slots=True)
@@ -75,6 +76,11 @@ class BlockExpression(Expression):
     """A ``do ... end`` body represented as a callable runtime value."""
 
     statements: list[Statement]
+
+
+@dataclass(slots=True)
+class ListExpression(Expression):
+    items: list[Expression]
 
 
 @dataclass(slots=True)
@@ -98,10 +104,25 @@ class ReturnStatement(Statement):
 
 
 @dataclass(slots=True)
+class FunctionParameterDefinition:
+    """One function parameter and the way callers must supply it.
+
+    ``is_named`` distinguishes ``host:`` from positional ``host``. A missing
+    ``default_value`` means the parameter is required in either form.
+    """
+
+    name: str
+    location: SourceLocation
+    is_named: bool
+    default_value: Expression | None
+
+
+@dataclass(slots=True)
 class FunctionDefinition(Statement):
     name: str
-    parameter_names: list[str]
+    parameters: list[FunctionParameterDefinition]
     body: list[Statement]
+    is_public: bool = False
 
 
 @dataclass(slots=True)
@@ -115,12 +136,14 @@ class StructFieldDefinition:
 class StructDefinition(Statement):
     name: str
     fields: list[StructFieldDefinition]
+    is_public: bool = False
 
 
 @dataclass(slots=True)
 class ModuleDefinition(Statement):
     name_path: list[str]
     body: list[Statement]
+    is_public: bool = False
 
 
 @dataclass(slots=True)
@@ -143,8 +166,26 @@ class IfStatement(Statement):
 
 
 @dataclass(slots=True)
+class ForStatement(Statement):
+    item_name: str
+    iterable_expression: Expression
+    body: list[Statement]
+
+
+@dataclass(slots=True)
+class ContinueStatement(Statement):
+    pass
+
+
+@dataclass(slots=True)
 class StructPattern:
-    struct_name: str
+    name_path: list[str]
+    location: SourceLocation
+
+
+@dataclass(slots=True)
+class LiteralPattern:
+    value: object
     location: SourceLocation
 
 
@@ -158,7 +199,7 @@ class WildcardPattern:
     location: SourceLocation
 
 
-WhenPattern: TypeAlias = StructPattern | NilPattern | WildcardPattern
+WhenPattern: TypeAlias = StructPattern | LiteralPattern | NilPattern | WildcardPattern
 
 
 @dataclass(slots=True)

@@ -1,0 +1,14 @@
+module Example
+    pub struct User
+        name,
+        age,
+    end
+
+    pub fn greet(user, from:)
+        if user.age >= 18
+            "Hello {user.name}, from {from}"
+        else
+            "Hi {user.name}"
+        end
+    end
+end

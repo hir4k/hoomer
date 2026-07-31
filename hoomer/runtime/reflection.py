@@ -71,7 +71,7 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
     if isinstance(value, RuntimeModule):
         module_values = [
             (name, value.environment.get_local(name))
-            for name in sorted(value.member_names)
+            for name in sorted(value.public_member_names)
         ]
         function_names = [
             name

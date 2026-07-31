@@ -17,6 +17,7 @@ class RuntimeModule:
         self.full_name = full_name
         self.environment = environment
         self.member_names: set[str] = set()
+        self.public_member_names: set[str] = set()
         self.is_builtin = is_builtin
 
     @property
@@ -26,12 +27,15 @@ class RuntimeModule:
     def register_member(self, member_name: str) -> None:
         """Make a declaration addressable through this module namespace.
 
-        Hoomer modules have no visibility modifier. For example, defining
-        ``fn login()`` inside ``Accounts`` automatically makes the function
-        available as ``Accounts.login()``.
+        This complete member set supports reflection and precise diagnostics.
+        External access is separately controlled by :meth:`make_public`.
         """
 
         self.member_names.add(member_name)
+
+    def make_public(self, member_name: str) -> None:
+        self.register_member(member_name)
+        self.public_member_names.add(member_name)
 
     def get_member(
         self,
@@ -39,13 +43,20 @@ class RuntimeModule:
         location: SourceLocation,
     ) -> object:
         member_exists = self.environment.has_local(member_name)
-        member_belongs_to_module = member_name in self.member_names
-        if member_exists and member_belongs_to_module:
+        member_is_public = member_name in self.public_member_names
+        if member_exists and member_is_public:
             return self.environment.get(member_name, location)
 
-        explanation = f"Module `{self.full_name}` has no member named `{member_name}`."
-        available_members = sorted(self.member_names)
-        expected = "a module member"
+        if member_exists and member_name in self.member_names:
+            explanation = (
+                f"`{self.full_name}.{member_name}` is private to module "
+                f"`{self.full_name}`. Add `pub` to its definition to expose it."
+            )
+        else:
+            explanation = f"Module `{self.full_name}` has no member named `{member_name}`."
+
+        available_members = sorted(self.public_member_names)
+        expected = "a public module member"
         if available_members:
             expected += ": " + ", ".join(available_members)
 
@@ -100,7 +111,7 @@ class ModuleRegistry:
                 else:
                     if not parent_module.environment.has_local(path_part):
                         parent_module.environment.define(path_part, module)
-                    parent_module.register_member(path_part)
+                    parent_module.make_public(path_part)
 
             parent_module = module
 
