@@ -1,0 +1,22 @@
+module Example
+    struct User
+        name
+        age
+    end
+
+    fn greet(user)
+        if user.age >= 18
+            "Hello {user.name}"
+        else
+            "Hi {user.name}"
+        end
+    end
+end
+
+user = Example.User(
+    name: "Hirakjyoti Das 😍",
+    age: 26
+)
+
+message = Example.greet(user)
+print message

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hoomer-language"
+version = "0.1.0"
+description = "A human-first interpreted programming language"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[project.scripts]
+hoomer = "hoomer.main:main"
+
+[tool.setuptools.packages.find]
+include = ["hoomer*"]
