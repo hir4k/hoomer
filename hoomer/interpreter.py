@@ -834,8 +834,6 @@ class Interpreter:
         if self._pattern_matches(expression.pattern, matched_value, environment):
             return matched_value
 
-        if expression.fallback_expression is None:
-            return None
         return self.evaluate_expression(expression.fallback_expression, environment)
 
     def _execute_for(

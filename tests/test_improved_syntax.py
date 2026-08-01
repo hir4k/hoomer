@@ -347,7 +347,7 @@ end
 
         self.assertIn("must be the final branch", str(caught_error.exception))
 
-    def test_inline_when_preserves_a_matching_struct_or_uses_nil(self) -> None:
+    def test_inline_when_preserves_a_matching_struct_or_uses_explicit_nil(self) -> None:
         source_code = """struct DatabaseConnection host end
 struct DatabaseConnectionError message end
 
@@ -359,8 +359,8 @@ fn connect!(should_connect)
     end
 end
 
-connection = connect!(true) when DatabaseConnection
-missing_connection = connect!(false) when DatabaseConnection
+connection = connect!(true) when DatabaseConnection else nil
+missing_connection = connect!(false) when DatabaseConnection else nil
 print connection.host
 print missing_connection
 """
@@ -374,7 +374,7 @@ print missing_connection
 struct UserError message end
 
 result = UserError(message: "missing")
-user = result when User
+user = result when User else nil
 print user
 """
 
@@ -406,7 +406,7 @@ fn find_user!(id)
     return UserNotFound(id: id)
 end
 
-user = find_user! 10 when User
+user = find_user! 10 when User else nil
 print user
 """
 
@@ -456,7 +456,7 @@ print probe.calls
         interpreter.execute_source(
             """import accounts
 
-user = Accounts.User(name: "Hirak") when Accounts.User
+user = Accounts.User(name: "Hirak") when Accounts.User else nil
 answer = 42 when 42 else 0
 wrong_answer = 41 when 42 else 0
 print user.name

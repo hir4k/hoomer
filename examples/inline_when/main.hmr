@@ -33,7 +33,7 @@ fn main
     missing_connection = connect_database!(
         "missing.database.local",
         available: false,
-    ) when DatabaseConnection
+    ) when DatabaseConnection else nil
 
     print "Without fallback: {missing_connection}"
 

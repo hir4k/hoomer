@@ -894,7 +894,7 @@ class Parser:
         self,
         matched_expression: ast.Expression,
     ) -> ast.Expression:
-        """Parse ``value when Pattern`` with an optional one-line fallback.
+        """Parse ``value when Pattern else fallback`` on one line.
 
         This is the compact form of the existing exhaustive ``when``. The
         matched expression is stored separately so the interpreter can both
@@ -907,9 +907,14 @@ class Parser:
         when_token = self._previous()
         pattern = self._parse_when_pattern()
 
-        fallback_expression = None
-        if self._match(TokenType.ELSE):
-            fallback_expression = self._parse_assignment()
+        if not self._match(TokenType.ELSE):
+            raise ParserError(
+                when_token.location,
+                "Inline `when` requires an explicit `else` fallback.",
+                expected="`else nil` or `else` followed by another value",
+                found=self._peek().describe(),
+            )
+        fallback_expression = self._parse_assignment()
 
         return ast.InlineWhenExpression(
             when_token.location,
@@ -1265,8 +1270,7 @@ class Parser:
 
         if isinstance(expression, ast.InlineWhenExpression):
             self._validate_functions_in_expression(expression.matched_expression)
-            if expression.fallback_expression is not None:
-                self._validate_functions_in_expression(expression.fallback_expression)
+            self._validate_functions_in_expression(expression.fallback_expression)
             return
 
         if isinstance(expression, ast.BlockExpression):

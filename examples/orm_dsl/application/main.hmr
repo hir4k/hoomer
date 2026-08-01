@@ -38,7 +38,7 @@ fn main
                 email: "hirak@example.com",
             ),
         )
-        created_user = create_result when User
+        created_user = create_result when User else nil
         print "Created: {created_user.name}"
 
         wrong_result = Database.create!(
@@ -47,7 +47,7 @@ fn main
         )
         show_create_error(wrong_result)
 
-        filtered_user = wrong_result when User
+        filtered_user = wrong_result when User else nil
         print "Filtered wrong record: {filtered_user}"
     end
 

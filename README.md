@@ -52,7 +52,7 @@ The `examples` directory includes standalone programs for familiar algorithms:
 - [`prime_numbers`](examples/prime_numbers) finds prime numbers up to 50.
 - [`user`](examples/user) imports and uses a struct from another package.
 - [`inline_when`](examples/inline_when) demonstrates compact result
-  filtering with implicit `nil` and an optional lazy fallback.
+  filtering with an explicit lazy fallback.
 - [`checkout_showcase`](examples/checkout_showcase/README.md) implements the same
   realistic checkout workflow in Ruby and Hoomer as a practical syntax comparison.
 - [`orm_dsl`](examples/orm_dsl/README.md) builds an executable Rails-inspired
@@ -608,13 +608,13 @@ its selected branch becomes that callable's implicit return value. An explicit
 `return` still exits early.
 
 When only one outcome matters, the inline form preserves a matching value and
-produces `nil` for every other outcome:
+requires an explicit fallback. Write `else nil` when absence is intentional:
 
 ```hmr
-connection = connect_database!() when DatabaseConnection
+connection = connect_database!() when DatabaseConnection else nil
 ```
 
-An optional `else` supplies a lazily evaluated fallback:
+The fallback is evaluated lazily only when the pattern does not match:
 
 ```hmr
 customer = find_customer!() when Customer else GuestCustomer()

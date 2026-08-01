@@ -225,8 +225,8 @@ class WhenExpression(Expression):
 
 @dataclass(slots=True)
 class InlineWhenExpression(Expression):
-    """Keep a matching value or produce a short fallback expression."""
+    """Keep a matching value or evaluate an explicit fallback expression."""
 
     matched_expression: Expression
     pattern: WhenPattern
-    fallback_expression: Expression | None
+    fallback_expression: Expression

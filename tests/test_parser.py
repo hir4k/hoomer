@@ -61,7 +61,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(range_expression.first_value.value, 0)
         self.assertEqual(range_expression.last_value.value, 10)
 
-    def test_parser_builds_inline_when_with_optional_fallback(self) -> None:
+    def test_parser_builds_inline_when_with_required_fallback(self) -> None:
         program = parse(
             "connection = connect!() when DatabaseConnection else nil\n"
         )
@@ -76,10 +76,10 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(inline_when.fallback_expression, ast.LiteralExpression)
         self.assertIsNone(inline_when.fallback_expression.value)
 
-        without_fallback = parse("connection = connect!() when DatabaseConnection\n")
-        inline_when = without_fallback.statements[0].expression.value
-        self.assertIsInstance(inline_when, ast.InlineWhenExpression)
-        self.assertIsNone(inline_when.fallback_expression)
+        with self.assertRaises(ParserError) as caught_error:
+            parse("connection = connect!() when DatabaseConnection\n")
+
+        self.assertIn("requires an explicit `else` fallback", str(caught_error.exception))
 
 
     def test_parser_supports_multiline_named_struct_arguments(self) -> None:
