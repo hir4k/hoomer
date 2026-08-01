@@ -120,8 +120,10 @@ class ReturnStatement(Statement):
 class FunctionParameterDefinition:
     """One function parameter and the way callers must supply it.
 
-    ``is_named`` distinguishes ``host:`` from positional ``host``. A missing
-    ``default_value`` means the parameter is required in either form.
+    ``is_named`` distinguishes ``host:`` from positional ``host``. Positional
+    parameters are always required. A named parameter may be required
+    (``host:``) or provide its default directly after the colon
+    (``retries: 3``).
     """
 
     name: str
@@ -201,11 +203,11 @@ class NilPattern:
 
 
 @dataclass(slots=True)
-class WildcardPattern:
+class ElsePattern:
     location: SourceLocation
 
 
-WhenPattern: TypeAlias = StructPattern | LiteralPattern | NilPattern | WildcardPattern
+WhenPattern: TypeAlias = StructPattern | LiteralPattern | NilPattern | ElsePattern
 
 
 @dataclass(slots=True)

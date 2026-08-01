@@ -56,15 +56,14 @@ class VSCodeExtensionTests(unittest.TestCase):
 
         self.assertTrue(expected_scopes.issubset(scope_names))
 
-    def test_expression_bodied_function_does_not_increase_indentation(self) -> None:
+    def test_function_definitions_increase_indentation(self) -> None:
         configuration = self._read_json("language-configuration.json")
         indentation_rules = configuration["indentationRules"]
         increase_indent = re.compile(indentation_rules["increaseIndentPattern"])
 
-        self.assertIsNone(increase_indent.match("fn answer() = 42"))
-        self.assertIsNone(increase_indent.match("pub fn answer() = 42"))
         self.assertIsNotNone(increase_indent.match("fn answer()"))
-        self.assertIsNotNone(increase_indent.match("fn answer(value=42)"))
+        self.assertIsNotNone(increase_indent.match("pub fn answer()"))
+        self.assertIsNotNone(increase_indent.match("fn answer(value: 42)"))
         self.assertIsNone(increase_indent.match("package Accounts"))
 
     def test_grammar_highlights_unquoted_package_import_paths(self) -> None:

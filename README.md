@@ -36,7 +36,7 @@ python3 -m unittest discover -v
 ```
 
 The MVP implements literals and interpolation, variables and constants,
-block and expression-bodied functions, default and named parameters, structs,
+block functions, default and named parameters, structs,
 field access and assignment, packages, imports, strict boolean `if`/`elsif`,
 exhaustive and inline `when` expressions, fallible-result markers, lists,
 inclusive ranges, `for` loops, `continue`, reflection, `do` blocks, source-aware
@@ -120,7 +120,7 @@ when user
     nil
         print "User not found"
 
-    _
+    else
         print "Unexpected result"
 end
 ```
@@ -360,7 +360,7 @@ struct User
 
     name,
     email,
-    active=true,
+    active: true,
 
 end
 ```
@@ -369,8 +369,8 @@ Creating:
 
 ```hmr
 user = User(
-    name="Hirak",
-    email="hirak@example.com",
+    name: "Hirak",
+    email: "hirak@example.com",
 )
 ```
 
@@ -381,7 +381,7 @@ Structs support:
 - Reflection
 
 Fields are comma-separated. A field without a default is required; a field with
-`=default` is optional. Construction always uses parentheses and `=` named
+`: default` is optional. Construction always uses parentheses and `:` named
 fields—positional struct construction is invalid. Small definitions may stay on
 one line: `struct Point x, y end`.
 
@@ -474,7 +474,7 @@ Example:
 
 ```hmr
 DatabaseError(
-    message="Connection failed",
+    message: "Connection failed",
 )
 ```
 
@@ -523,7 +523,7 @@ when result
     DatabaseError as error
         print error.message
 
-    _
+    else
         print "Unexpected result"
 end
 ```
@@ -545,7 +545,9 @@ Hoomer uses descriptive function names instead of a special `?` suffix.
 Example:
 
 ```hmr
-fn is_active(user) = user.active
+fn is_active(user)
+    user.active
+end
 ```
 
 Usage:
@@ -578,13 +580,14 @@ when result
     nil
         print "Nothing found"
 
-    _ as unexpected
+    else as unexpected
         print "Unknown: {unexpected}"
 end
 ```
 
-The `as` keyword creates a branch-local name. A final `_` branch is required so
-new outcomes cannot silently pass through unmatched.
+The `as` keyword creates a branch-local name. A final `else` branch is required
+so new outcomes cannot silently pass through unmatched. Use `else as value` when
+the unmatched value is needed inside that branch.
 
 `when` is an expression. Its selected branch contributes its final value:
 
@@ -595,13 +598,14 @@ database = when connect_database!()
     DatabaseConnectionFailure as error
         print error.message
         nil
-    _
+    else
         nil
 end
 ```
 
-This branch value does not return from a function. Only `return` exits a
-function or `do` block.
+When the `when` expression is the final expression of a function or `do` block,
+its selected branch becomes that callable's implicit return value. An explicit
+`return` still exits early.
 
 When only one outcome matters, the inline form preserves a matching value and
 produces `nil` for every other outcome:
@@ -638,7 +642,7 @@ Hoomer prefers:
 when result
     User as user
         print user.name
-    _
+    else
         nil
 end
 ```
@@ -654,25 +658,33 @@ Functions are the main unit of behavior.
 Example:
 
 ```hmr
-fn greet(name) = "Hello {name}"
+fn greet(name)
+    "Hello {name}"
+end
 ```
 
-Parameters may be positional or named, and either form may have a default:
+Parameters may be positional or named. Positional parameters are always
+required; a default makes a parameter named:
 
 ```hmr
 fn connect(
-    retries=3,
+    service,
     host:,
-    port: = 5432,
+    retries: 3,
+    port: 5432,
 )
     # ...
 end
 
-connect(5, host="localhost")
+connect("database", host: "localhost")
 ```
 
-Positional parameters always appear before named parameters. Calls use `=` for
-named arguments; `:` is reserved for declaring named parameters.
+The three parameter forms are `name` for required positional, `name:` for
+required named, and `name: default` for named with a default. Required
+positional parameters appear before named parameters, and required named
+parameters appear before named defaults. Calls use the same `name: value`
+spelling as struct construction. `=` remains assignment rather than carrying a
+second meaning inside calls.
 
 Ordinary calls may omit parentheses when the call stays unambiguous on one
 line—`greet "Hirak"` and `greet("Hirak")` are equivalent. Struct construction
@@ -693,7 +705,8 @@ Here, `field` is an ordinary function supplied by the library. A migration
 runner invokes the definition with `change()`; empty parentheses remain
 required at the call site because `change` by itself refers to the function.
 
-Returning a value is always explicit:
+The final expression of a block function is returned implicitly. `return`
+remains available for an early exit:
 
 ```hmr
 fn validate(name)
@@ -701,23 +714,13 @@ fn validate(name)
         return "Invalid"
     end
 
-    return "Valid"
+    "Valid"
 end
 ```
 
-For a function that is only one expression, `=` makes the returned value
-explicit without a separate `return` or closing `end`:
-
-```hmr
-fn is_active(user) = user.active
-```
-
-Use the block form when a function needs multiple steps or control flow. A final
-expression in a block function is still discarded; only `return` exits that
-form with a value.
-
-An action-only function may reach `end`, which produces `nil`. If any path
-returns a value, every completion path must explicitly return a value.
+Every function uses the same body-and-`end` form, including functions with one
+expression. An empty body, bare `return`, or final action such as `print`
+produces `nil`.
 
 ---
 
@@ -729,8 +732,8 @@ perform overload selection.
 Example:
 
 ```hmr
-fn greet(name="World")
-    return "Hello {name}"
+fn greet(name: "World")
+    "Hello {name}"
 end
 ```
 
@@ -823,8 +826,8 @@ each item, and `continue` skips directly to the next one.
 
 ```hmr
 users = [
-    User(name="Hirak"),
-    User(name="Rahul"),
+    User(name: "Hirak"),
+    User(name: "Rahul"),
 ]
 
 for user in users

@@ -15,8 +15,13 @@ class PackagesAndImportsTests(unittest.TestCase):
         interpreter.execute_source(
             """package Accounts
 
-pub fn login() = "logged in"
-pub fn logout() = "logged out"
+pub fn login()
+    "logged in"
+end
+
+pub fn logout()
+    "logged out"
+end
 """,
             "accounts.hmr",
         )
@@ -37,14 +42,18 @@ pub fn logout() = "logged out"
 import text:
     trim
 
-fn normalized_name(name) = trim(name)
+fn normalized_name(name)
+    trim(name)
+end
 """,
                 encoding="utf-8",
             )
             (package_directory / "login.hmr").write_text(
                 """package Accounts
 
-fn login(name) = normalized_name(name)
+fn login(name)
+    normalized_name(name)
+end
 
 fn main
     print login("  Hirak  ")
@@ -68,7 +77,9 @@ end
 import text:
     trim
 
-fn normalized_name(name) = trim(name)
+fn normalized_name(name)
+    trim(name)
+end
 """,
                 encoding="utf-8",
             )
@@ -96,11 +107,11 @@ end
             accounts_directory.mkdir()
             application_directory.mkdir()
             (accounts_directory / "accounts.hmr").write_text(
-                "package Accounts\n\npub fn name() = \"Accounts\"\n",
+                "package Accounts\n\npub fn name()\n    \"Accounts\"\nend\n",
                 encoding="utf-8",
             )
             (application_directory / "helper.hmr").write_text(
-                "package Application\n\nimport accounts\n\nfn helper() = Accounts.name()\n",
+                "package Application\n\nimport accounts\n\nfn helper()\n    Accounts.name()\nend\n",
                 encoding="utf-8",
             )
             (application_directory / "main.hmr").write_text(
@@ -125,7 +136,7 @@ end
                 """package Accounts
 
 pub struct Teacher
-    name="",
+    name: "",
 end
 """,
                 encoding="utf-8",
@@ -136,7 +147,7 @@ end
 import accounts as TeacherAccount
 
 fn main
-    teacher = TeacherAccount.Teacher(name="Hirak")
+    teacher = TeacherAccount.Teacher(name: "Hirak")
     print teacher.name
 end
 """,
@@ -165,11 +176,11 @@ end
                 encoding="utf-8",
             )
             (local_accounts_directory / "accounts.hmr").write_text(
-                'package Accounts\n\npub fn source() = "project"\n',
+                'package Accounts\n\npub fn source()\n    "project"\nend\n',
                 encoding="utf-8",
             )
             (installed_accounts_directory / "accounts.hmr").write_text(
-                'package Accounts\n\npub fn source() = "installed"\n',
+                'package Accounts\n\npub fn source()\n    "installed"\nend\n',
                 encoding="utf-8",
             )
             (application_directory / "main.hmr").write_text(
@@ -207,7 +218,7 @@ end
                 encoding="utf-8",
             )
             (accounts_directory / "accounts.hmr").write_text(
-                'package Accounts\n\npub fn greeting() = "hello"\n',
+                'package Accounts\n\npub fn greeting()\n    "hello"\nend\n',
                 encoding="utf-8",
             )
             (application_directory / "main.hmr").write_text(
@@ -239,7 +250,7 @@ end
                 encoding="utf-8",
             )
             (accounts_directory / "accounts.hmr").write_text(
-                'package Accounts\n\npub fn greeting() = "hello"\n',
+                'package Accounts\n\npub fn greeting()\n    "hello"\nend\n',
                 encoding="utf-8",
             )
             (application_directory / "main.hmr").write_text(
@@ -264,7 +275,9 @@ pub struct User
     name,
 end
 
-pub fn find_user() = nil
+pub fn find_user()
+    nil
+end
 """,
             "accounts.hmr",
         )
@@ -329,11 +342,11 @@ DATABASE = connect()
             package_directory = Path(temporary_directory) / "accounts"
             package_directory.mkdir()
             (package_directory / "first.hmr").write_text(
-                "package Accounts\n\nfn find_user() = nil\n",
+                "package Accounts\n\nfn find_user()\n    nil\nend\n",
                 encoding="utf-8",
             )
             (package_directory / "second.hmr").write_text(
-                "package Accounts\n\nfn find_user() = nil\n",
+                "package Accounts\n\nfn find_user()\n    nil\nend\n",
                 encoding="utf-8",
             )
 
@@ -365,7 +378,7 @@ DATABASE = connect()
             package_directory = Path(temporary_directory) / "accounts"
             package_directory.mkdir()
             (package_directory / "accounts.hmr").write_text(
-                "fn find_user() = nil\n",
+                "fn find_user()\n    nil\nend\n",
                 encoding="utf-8",
             )
 
@@ -382,7 +395,7 @@ DATABASE = connect()
             package_directory = Path(temporary_directory) / "accounts"
             package_directory.mkdir()
             (package_directory / "accounts.hmr").write_text(
-                "package Billing\n\nfn invoice() = nil\n",
+                "package Billing\n\nfn invoice()\n    nil\nend\n",
                 encoding="utf-8",
             )
 
@@ -419,11 +432,11 @@ DATABASE = connect()
             first_directory.mkdir()
             second_directory.mkdir()
             (first_directory / "first.hmr").write_text(
-                "package First\n\nimport second\n\nfn first() = nil\n",
+                "package First\n\nimport second\n\nfn first()\n    nil\nend\n",
                 encoding="utf-8",
             )
             (second_directory / "second.hmr").write_text(
-                "package Second\n\nimport first\n\nfn second() = nil\n",
+                "package Second\n\nimport first\n\nfn second()\n    nil\nend\n",
                 encoding="utf-8",
             )
 
@@ -440,7 +453,9 @@ DATABASE = connect()
         interpreter.execute_source(
             """package Accounts
 
-fn internal_helper() = "hidden"
+fn internal_helper()
+    "hidden"
+end
 """,
             "accounts.hmr",
         )

@@ -9,7 +9,7 @@ fn is_divisible(number, divisor)
         return false
     end
 
-    return is_divisible(number - divisor, divisor)
+    is_divisible(number - divisor, divisor)
 end
 
 fn fizzbuzz_value(number)
@@ -28,7 +28,7 @@ fn fizzbuzz_value(number)
         return "Buzz"
     end
 
-    return number
+    number
 end
 
 fn print_fizzbuzz(number, limit)

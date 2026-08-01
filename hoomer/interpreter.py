@@ -450,8 +450,11 @@ class Interpreter:
         self._loop_depth = 0
         try:
             try:
-                self.execute_statements(statements, environment)
-                return None
+                return self.execute_statements(
+                    statements,
+                    environment,
+                    result_is_used=True,
+                )
             except ReturnFromFunction as return_signal:
                 return return_signal.value
         finally:
@@ -463,10 +466,21 @@ class Interpreter:
         statements: list[ast.Statement],
         environment: Environment,
         active_package: RuntimePackage | None = None,
+        *,
+        result_is_used: bool = False,
     ) -> object:
         last_value: object = None
-        for statement in statements:
-            last_value = self.execute_statement(statement, environment, active_package)
+        final_statement_index = len(statements) - 1
+        for statement_index, statement in enumerate(statements):
+            statement_result_is_used = (
+                result_is_used and statement_index == final_statement_index
+            )
+            last_value = self.execute_statement(
+                statement,
+                environment,
+                active_package,
+                result_is_used=statement_result_is_used,
+            )
         return last_value
 
     def execute_statement(
@@ -474,6 +488,8 @@ class Interpreter:
         statement: ast.Statement,
         environment: Environment,
         active_package: RuntimePackage | None = None,
+        *,
+        result_is_used: bool = False,
     ) -> object:
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
@@ -482,7 +498,8 @@ class Interpreter:
                     expression.callable_expression,
                     environment,
                 )
-                if self._is_fallible_callable(callable_value):
+                result_is_discarded = not result_is_used
+                if self._is_fallible_callable(callable_value) and result_is_discarded:
                     raise RuntimeHoomerError(
                         expression.location,
                         f"The result of fallible function "
@@ -497,6 +514,12 @@ class Interpreter:
                     expression,
                     environment,
                     callable_value,
+                )
+            elif isinstance(expression, ast.WhenExpression):
+                expression_value = self._evaluate_when(
+                    expression,
+                    environment,
+                    result_is_used=result_is_used,
                 )
             else:
                 expression_value = self.evaluate_expression(expression, environment)
@@ -547,7 +570,12 @@ class Interpreter:
             return self._execute_import(statement, environment)
 
         if isinstance(statement, ast.IfStatement):
-            return self._execute_if(statement, environment, active_package)
+            return self._execute_if(
+                statement,
+                environment,
+                active_package,
+                result_is_used=result_is_used,
+            )
 
         if isinstance(statement, ast.ForStatement):
             return self._execute_for(statement, environment, active_package)
@@ -732,6 +760,8 @@ class Interpreter:
         statement: ast.IfStatement,
         environment: Environment,
         active_package: RuntimePackage | None,
+        *,
+        result_is_used: bool,
     ) -> object:
         for branch in statement.branches:
             condition_value = self.evaluate_expression(branch.condition, environment)
@@ -747,6 +777,7 @@ class Interpreter:
                     branch.body,
                     Environment(environment),
                     active_package,
+                    result_is_used=result_is_used,
                 )
 
         if statement.else_body is None:
@@ -755,12 +786,15 @@ class Interpreter:
             statement.else_body,
             Environment(environment),
             active_package,
+            result_is_used=result_is_used,
         )
 
     def _evaluate_when(
         self,
         expression: ast.WhenExpression,
         environment: Environment,
+        *,
+        result_is_used: bool = True,
     ) -> object:
         matched_value = self.evaluate_expression(expression.matched_expression, environment)
 
@@ -775,12 +809,16 @@ class Interpreter:
                     matched_value,
                     location=branch.pattern.location,
                 )
-            return self.execute_statements(branch.body, branch_environment)
+            return self.execute_statements(
+                branch.body,
+                branch_environment,
+                result_is_used=result_is_used,
+            )
 
         raise RuntimeHoomerError(
             expression.location,
             "No branch matched this `when` value.",
-            expected="the required final `_` branch to match",
+            expected="the required final `else` branch to match",
             found=runtime_type_name(matched_value),
         )
 
@@ -849,7 +887,7 @@ class Interpreter:
         matched_value: object,
         environment: Environment,
     ) -> bool:
-        if isinstance(pattern, ast.WildcardPattern):
+        if isinstance(pattern, ast.ElsePattern):
             return True
         if isinstance(pattern, ast.NilPattern):
             return matched_value is None
@@ -866,7 +904,7 @@ class Interpreter:
                 raise RuntimeHoomerError(
                     pattern.location,
                     f"Pattern `{pattern_name}` does not name a struct.",
-                    expected="a struct name, literal, `nil`, or `_`",
+                    expected="a struct name, literal, `nil`, or `else`",
                     found=runtime_type_name(expected_struct),
                 )
             return (
@@ -1039,7 +1077,7 @@ class Interpreter:
             raise RuntimeHoomerError(
                 expression.location,
                 f"Struct `{callable_value.name}` construction always requires parentheses.",
-                expected=f"`{callable_value.name}(field_name=value)`",
+                expected=f"`{callable_value.name}(field_name: value)`",
                 found="a parenthesis-free struct call",
             )
         positional_arguments: list[object] = []

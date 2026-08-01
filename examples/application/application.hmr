@@ -13,14 +13,14 @@ fn main
     create_result = Accounts.create_user!(
         "Hirak",
         "hirak@example.com",
-        age=26,
+        age: 26,
     )
 
     when create_result
         Accounts.User as response
             message = Accounts.greet(
                 response,
-                greeting="Welcome",
+                greeting: "Welcome",
             )
 
             print message
@@ -34,7 +34,7 @@ fn main
         nil
             print "No user was created"
 
-        _
+        else
             print "Unknown result"
     end
 
@@ -51,7 +51,7 @@ fn main
                 nil
                     print "City was not provided"
 
-                _
+                else
                     print "User lives somewhere else"
             end
 
@@ -64,21 +64,21 @@ fn main
         nil
             print "User was not found"
 
-        _
+        else
             print "Unexpected value"
     end
 
     users = [
         Accounts.User(
-            name="Hirak",
-            email="hirak@example.com",
-            age=26,
+            name: "Hirak",
+            email: "hirak@example.com",
+            age: 26,
         ),
 
         Accounts.User(
-            name="Rahul",
-            email="rahul@example.com",
-            age=16,
+            name: "Rahul",
+            email: "rahul@example.com",
+            age: 16,
         ),
     ]
 

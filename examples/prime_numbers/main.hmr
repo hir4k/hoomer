@@ -9,7 +9,7 @@ fn is_divisible(number, divisor)
         return false
     end
 
-    return is_divisible(number - divisor, divisor)
+    is_divisible(number - divisor, divisor)
 end
 
 fn has_no_divisor(number, candidate)
@@ -21,7 +21,7 @@ fn has_no_divisor(number, candidate)
         return false
     end
 
-    return has_no_divisor(number, candidate + 1)
+    has_no_divisor(number, candidate + 1)
 end
 
 fn is_prime(number)
@@ -29,7 +29,7 @@ fn is_prime(number)
         return false
     end
 
-    return has_no_divisor(number, 2)
+    has_no_divisor(number, 2)
 end
 
 fn print_primes(number, limit)

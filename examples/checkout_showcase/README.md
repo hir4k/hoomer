@@ -37,10 +37,10 @@ python3 -m hoomer.main examples/checkout_showcase/hoomer/checkout
 | Text | interpolation, `strip`, `downcase` | interpolation, imported `trim`, `lowercase` |
 | State | struct field assignment | struct field assignment |
 | Introspection | `class`, `members`, `method` | `reflect` |
-| Control flow | `return`, `next`, implicit method values | explicit `return`, `continue`, branch values |
+| Control flow | `return`, `next`, implicit method values | early `return`, `continue`, implicit function and branch values |
 | Other values | numbers, strings, booleans, `nil`, arrays | numbers, strings, booleans, `nil`, lists |
 
-The deliberately different lines are useful design evidence. Ruby's implicit
-returns and dense collection helpers make it shorter. Hoomer's explicit returns,
-strict booleans, exhaustive matching, and visible fallible-result handling make
-more of the control flow readable without knowing conventions outside the file.
+The deliberately different lines are useful design evidence. Ruby's dense
+collection helpers make it shorter. Hoomer's strict booleans, exhaustive
+matching, and visible fallible-result handling make more of the control flow
+readable without knowing conventions outside the file.

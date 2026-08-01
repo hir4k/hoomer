@@ -52,14 +52,8 @@ class RuntimeFunction:
         positional_argument_count: int,
         named_argument_names: set[str],
     ) -> bool:
-        required_positional_count = sum(
-            parameter.default_value is None
-            for parameter in self.positional_parameters
-        )
         positional_count_is_valid = (
-            required_positional_count
-            <= positional_argument_count
-            <= len(self.positional_parameters)
+            positional_argument_count == len(self.positional_parameters)
         )
 
         allowed_named_names = {parameter.name for parameter in self.named_parameters}
@@ -89,7 +83,6 @@ class RuntimeFunction:
 
         call_environment = Environment(self.closure_environment)
         self._bind_positional_parameters(
-            interpreter,
             call_environment,
             positional_arguments,
             location,
@@ -108,19 +101,15 @@ class RuntimeFunction:
 
     def _bind_positional_parameters(
         self,
-        interpreter: Interpreter,
         call_environment: Environment,
         positional_arguments: list[object],
         location: SourceLocation,
     ) -> None:
-        for parameter_index, parameter in enumerate(self.positional_parameters):
-            if parameter_index < len(positional_arguments):
-                parameter_value = positional_arguments[parameter_index]
-            else:
-                parameter_value = interpreter.evaluate_expression(
-                    parameter.default_value,
-                    call_environment,
-                )
+        for parameter, parameter_value in zip(
+            self.positional_parameters,
+            positional_arguments,
+            strict=True,
+        ):
             call_environment.define(parameter.name, parameter_value, location=location)
 
     def _bind_named_parameters(
@@ -163,7 +152,7 @@ class RuntimeFunction:
         for parameter in self.parameters:
             rendered_name = parameter.name + (":" if parameter.is_named else "")
             if parameter.default_value is not None:
-                rendered_name += " = <default>"
+                rendered_name += " <default>"
             rendered_parameters.append(rendered_name)
         return f"{self.name}({', '.join(rendered_parameters)})"
 

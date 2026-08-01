@@ -6,8 +6,8 @@ end
 
 pub fn greet(user, from:)
     if user.age >= 18
-        return "Hello {user.name}, from {from}"
+        "Hello {user.name}, from {from}"
     else
-        return "Hi {user.name}"
+        "Hi {user.name}"
     end
 end

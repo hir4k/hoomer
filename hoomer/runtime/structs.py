@@ -26,7 +26,7 @@ class RuntimeStructDefinition:
     Defaults remain expressions until construction. This matters once Hoomer
     gains mutable composite values: evaluating a default once at definition time
     would accidentally share the same value between every instance. For example,
-    a future ``items = []`` default must create a fresh list per struct instance.
+    a future ``items: []`` default must create a fresh list per struct instance.
     """
 
     def __init__(
@@ -50,7 +50,7 @@ class RuntimeStructDefinition:
             raise RuntimeHoomerError(
                 location,
                 f"Struct `{self.name}` is constructed with named fields.",
-                expected=f"`{self.name}(field_name=value)`",
+                expected=f"`{self.name}(field_name: value)`",
                 found=f"{len(positional_arguments)} positional argument(s)",
             )
 

@@ -30,7 +30,7 @@ class CliTests(unittest.TestCase):
             package_directory = Path(temporary_directory) / "library"
             package_directory.mkdir()
             (package_directory / "library.hmr").write_text(
-                "package Library\n\npub fn greeting() = \"hello\"\n",
+                "package Library\n\npub fn greeting()\n    \"hello\"\nend\n",
                 encoding="utf-8",
             )
             standard_output = io.StringIO()

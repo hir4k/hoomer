@@ -20,10 +20,10 @@ end
 pub fn model(sample_record, table:)
     record_info = reflect(sample_record)
 
-    return Model(
-        name=record_info.name,
-        table=table,
-        fields=record_info.fields,
+    Model(
+        name: record_info.name,
+        table: table,
+        fields: record_info.fields,
     )
 end
 
@@ -37,34 +37,34 @@ pub fn create!(model, record)
 
     if record_info.name != model.name
         return ModelMismatchError(
-            table=model.table,
-            expected_model=model.name,
-            received_model=record_info.name,
+            table: model.table,
+            expected_model: model.name,
+            received_model: record_info.name,
         )
     end
 
     print "Inserted {record_info.name} into {model.table}"
-    return record
+    record
 end
 
 pub fn all(model)
-    return Query(
-        model=model,
-        statement="SELECT * FROM {model.table}",
+    Query(
+        model: model,
+        statement: "SELECT * FROM {model.table}",
     )
 end
 
 pub fn where(query, field:, equals:)
-    return Query(
-        model=query.model,
-        statement="{query.statement} WHERE {field} = {equals}",
+    Query(
+        model: query.model,
+        statement: "{query.statement} WHERE {field} = {equals}",
     )
 end
 
-pub fn limit(query, count=100)
-    return Query(
-        model=query.model,
-        statement="{query.statement} LIMIT {count}",
+pub fn limit(query, count: 100)
+    Query(
+        model: query.model,
+        statement: "{query.statement} LIMIT {count}",
     )
 end
 
@@ -77,4 +77,3 @@ pub fn transaction(block)
     block()
     print "COMMIT"
 end
-

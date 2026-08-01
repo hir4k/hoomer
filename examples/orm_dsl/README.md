@@ -15,7 +15,7 @@ functions:
 
 ```hmr
 query = Database.all(user_model)
-query = Database.where(query, field="active", equals=true)
+query = Database.where(query, field: "active", equals: true)
 query = Database.limit(query, 10)
 Database.execute(query)
 ```

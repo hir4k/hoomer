@@ -8,19 +8,19 @@ struct DatabaseConnectionError
     message,
 end
 
-fn connect_database!(host, available: = true)
+fn connect_database!(host, available: true)
     if available
-        return DatabaseConnection(host=host)
+        DatabaseConnection(host: host)
+    else
+        DatabaseConnectionError(
+            message: "Could not connect to {host}",
+        )
     end
-
-    return DatabaseConnectionError(
-        message="Could not connect to {host}",
-    )
 end
 
 fn create_offline_connection()
     print "Creating offline connection"
-    return DatabaseConnection(host="offline")
+    DatabaseConnection(host: "offline")
 end
 
 fn main
@@ -32,14 +32,14 @@ fn main
 
     missing_connection = connect_database!(
         "missing.database.local",
-        available=false,
+        available: false,
     ) when DatabaseConnection
 
     print "Without fallback: {missing_connection}"
 
     fallback_connection = connect_database!(
         "backup.database.local",
-        available=false,
+        available: false,
     ) when DatabaseConnection else create_offline_connection()
 
     print "With fallback: {fallback_connection.host}"

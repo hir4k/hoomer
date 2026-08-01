@@ -25,24 +25,24 @@ end
         self.assertEqual(output, "Hello Hirak, score: 11\n")
 
 
-    def test_functions_use_explicit_returns_and_default_parameters(self) -> None:
+    def test_functions_use_implicit_returns_and_named_default_parameters(self) -> None:
         _, output, _ = run_hoomer(
-            """fn greet(name="World")
+            """fn greet(name: "World")
     if name == ""
         return "Hello, stranger"
     end
-    return "Hello, {name}"
+    "Hello, {name}"
 end
 
 print greet()
-print greet("Hirak")
-print greet("")
+print greet(name: "Hirak")
+print greet(name: "")
 """
         )
 
         self.assertEqual(output, "Hello, World\nHello, Hirak\nHello, stranger\n")
 
-    def test_final_expression_is_not_returned_automatically(self) -> None:
+    def test_final_expression_is_returned_automatically(self) -> None:
         _, output, _ = run_hoomer(
             """fn answer()
     42
@@ -52,7 +52,7 @@ print answer()
 """
         )
 
-        self.assertEqual(output, "nil\n")
+        self.assertEqual(output, "42\n")
 
     def test_if_conditions_require_a_boolean(self) -> None:
         with self.assertRaises(RuntimeHoomerError) as caught_error:
@@ -98,28 +98,28 @@ end
         self.assertIn("already defined", str(caught_error.exception))
         self.assertIn("one definition", str(caught_error.exception))
 
-    def test_value_returning_function_must_return_on_every_path(self) -> None:
-        with self.assertRaises(ParserError) as caught_error:
-            run_hoomer(
-                """fn find_name(found)
+    def test_function_without_a_value_on_one_path_returns_nil_on_that_path(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn find_name(found)
     if found
-        return "Hirak"
+        "Hirak"
     end
 end
-"""
-            )
 
-        rendered_error = str(caught_error.exception)
-        self.assertIn("only some paths", rendered_error)
-        self.assertIn("explicit `return value`", rendered_error)
+print find_name(true)
+print find_name(false)
+"""
+        )
+
+        self.assertEqual(output, "Hirak\nnil\n")
 
     def test_value_returning_function_accepts_complete_if_paths(self) -> None:
         _, output, _ = run_hoomer(
             """fn label(ready)
     if ready
-        return "ready"
+        "ready"
     else
-        return "waiting"
+        "waiting"
     end
 end
 
@@ -130,20 +130,22 @@ print label(false)
 
         self.assertEqual(output, "ready\nwaiting\n")
 
-    def test_bare_return_is_not_a_value_return_path(self) -> None:
-        with self.assertRaises(ParserError) as caught_error:
-            run_hoomer(
-                """fn find_name(found)
+    def test_bare_return_still_returns_nil_early(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn find_name(found)
     if found
-        return "Hirak"
+        "Hirak"
     else
         return
     end
 end
-"""
-            )
 
-        self.assertIn("bare `return`", str(caught_error.exception))
+print find_name(true)
+print find_name(false)
+"""
+        )
+
+        self.assertEqual(output, "Hirak\nnil\n")
 
 
     def test_constants_cannot_be_reassigned(self) -> None:

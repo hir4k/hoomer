@@ -12,18 +12,18 @@ LOYALTY_BONUS = 10
 fn create_customer(
     name,
     email:,
-    country: = "India",
-    premium: = false,
-    loyalty_points: = 0,
+    country: "India",
+    premium: false,
+    loyalty_points: 0,
 )
     normalized_email = lowercase(trim(email))
 
-    return Domain.Customer(
-        name=name,
-        email=normalized_email,
-        country=country,
-        premium=premium,
-        loyalty_points=loyalty_points,
+    Domain.Customer(
+        name: name,
+        email: normalized_email,
+        country: country,
+        premium: premium,
+        loyalty_points: loyalty_points,
     )
 end
 
@@ -31,26 +31,26 @@ fn validate_order!(items)
     for item in items
         if item.quantity <= 0
             return Domain.ValidationError(
-                message="{item.product.name} quantity must be positive",
+                message: "{item.product.name} quantity must be positive",
             )
         end
     end
 
-    return Domain.ValidatedOrder(items=items)
+    Domain.ValidatedOrder(items: items)
 end
 
 fn reserve_inventory!(order)
     for item in order.items
         if item.quantity > item.product.available
             return Domain.InventoryError(
-                product_name=item.product.name,
-                requested=item.quantity,
-                available=item.product.available,
+                product_name: item.product.name,
+                requested: item.quantity,
+                available: item.product.available,
             )
         end
     end
 
-    return Domain.InventoryReserved(items=order.items)
+    Domain.InventoryReserved(items: order.items)
 end
 
 fn calculate_subtotal(items)
@@ -61,53 +61,55 @@ fn calculate_subtotal(items)
         subtotal_cents = subtotal_cents + line_total_cents
     end
 
-    return subtotal_cents
+    subtotal_cents
 end
 
-fn is_international(customer) = customer.country != "India"
+fn is_international(customer)
+    customer.country != "India"
+end
 
-fn calculate_discount(customer, subtotal_cents, coupon_code=nil)
+fn calculate_discount(customer, subtotal_cents, coupon_code: nil)
     if is_international(customer)
         return 0
     end
 
     if coupon_code == "HUMAN10"
-        return subtotal_cents / 10
+        subtotal_cents / 10
     elsif customer.premium
-        return subtotal_cents / 20
+        subtotal_cents / 20
     else
-        return 0
+        0
     end
 end
 
 fn describe_coupon(coupon_code)
-    return when coupon_code
+    when coupon_code
         "HUMAN10"
             "HUMAN10"
         nil
             "none"
-        _ as unknown_code
+        else as unknown_code
             "{unknown_code} (unrecognized)"
     end
 end
 
-fn charge_payment!(amount_cents, limit_cents: = PAYMENT_LIMIT_CENTS)
+fn charge_payment!(amount_cents, limit_cents: PAYMENT_LIMIT_CENTS)
     if amount_cents > limit_cents
         return Domain.PaymentError(
-            message="Payment declined for {amount_cents} cents",
+            message: "Payment declined for {amount_cents} cents",
         )
     end
 
-    return Domain.PaymentApproved(amount_cents=amount_cents)
+    Domain.PaymentApproved(amount_cents: amount_cents)
 end
 
 fn customer_level(customer)
     if customer.loyalty_points >= 100
-        return "gold"
+        "gold"
     elsif customer.loyalty_points >= 50
-        return "silver"
+        "silver"
     else
-        return "new"
+        "new"
     end
 end
 
@@ -118,11 +120,11 @@ end
 fn notify_warehouse!(receipt)
     if receipt.charged_cents < 0
         return Domain.NotificationError(
-            message="Cannot notify the warehouse about a refund",
+            message: "Cannot notify the warehouse about a refund",
         )
     end
 
-    return Domain.NotificationSent(channel="warehouse")
+    Domain.NotificationSent(channel: "warehouse")
 end
 
 fn divider(width)
@@ -130,7 +132,7 @@ fn divider(width)
         return ""
     end
 
-    return "-" + divider(width - 1)
+    "-" + divider(width - 1)
 end
 
 fn audit(label, block)
@@ -142,17 +144,17 @@ end
 pub fn checkout!(
     customer,
     items,
-    coupon_code=nil,
-    payment_limit_cents: = PAYMENT_LIMIT_CENTS,
+    coupon_code: nil,
+    payment_limit_cents: PAYMENT_LIMIT_CENTS,
 )
     validated_order = when validate_order!(items)
         Domain.ValidatedOrder as order
             order
         Domain.ValidationError as error
             return error
-        _
+        else
             return Domain.UnexpectedCheckoutError(
-                message="Validation returned an unknown value",
+                message: "Validation returned an unknown value",
             )
     end
 
@@ -161,9 +163,9 @@ pub fn checkout!(
             reservation
         Domain.InventoryError as error
             return error
-        _
+        else
             return Domain.UnexpectedCheckoutError(
-                message="Inventory returned an unknown value",
+                message: "Inventory returned an unknown value",
             )
     end
 
@@ -171,33 +173,33 @@ pub fn checkout!(
     discount_cents = calculate_discount(
         customer,
         subtotal_cents,
-        coupon_code,
+        coupon_code: coupon_code,
     )
     charged_cents = subtotal_cents - discount_cents
 
     payment = when charge_payment!(
         charged_cents,
-        limit_cents=payment_limit_cents,
+        limit_cents: payment_limit_cents,
     )
         Domain.PaymentApproved as approval
             approval
         Domain.PaymentError as error
             return error
-        _
+        else
             return Domain.UnexpectedCheckoutError(
-                message="Payment returned an unknown value",
+                message: "Payment returned an unknown value",
             )
     end
 
     reward_customer(customer)
 
-    return Domain.Receipt(
-        customer_name=customer.name,
-        customer_level=customer_level(customer),
-        subtotal_cents=subtotal_cents,
-        discount_cents=discount_cents,
-        charged_cents=payment.amount_cents,
-        coupon_code=coupon_code,
+    Domain.Receipt(
+        customer_name: customer.name,
+        customer_level: customer_level(customer),
+        subtotal_cents: subtotal_cents,
+        discount_cents: discount_cents,
+        charged_cents: payment.amount_cents,
+        coupon_code: coupon_code,
     )
 end
 
@@ -220,7 +222,7 @@ fn show_result(result)
         Domain.PaymentError as error
             print error.message
 
-        _
+        else
             print "Unexpected checkout result"
     end
 end
@@ -235,26 +237,26 @@ end
 
 fn main
     keyboard = Domain.Product(
-        name="Keyboard",
-        price_cents=2500,
-        available=2,
+        name: "Keyboard",
+        price_cents: 2500,
+        available: 2,
     )
     mouse = Domain.Product(
-        name="Mouse",
-        price_cents=900,
-        available=5,
+        name: "Mouse",
+        price_cents: 900,
+        available: 5,
     )
     monitor = Domain.Product(
-        name="Monitor",
-        price_cents=12000,
-        available=1,
+        name: "Monitor",
+        price_cents: 12000,
+        available: 1,
     )
 
     customer = create_customer(
         "Hirak",
-        email="  HIRAK@EXAMPLE.COM  ",
-        premium=true,
-        loyalty_points=95,
+        email: "  HIRAK@EXAMPLE.COM  ",
+        premium: true,
+        loyalty_points: 95,
     )
 
     print divider(42)
@@ -263,31 +265,31 @@ fn main
 
     audit "three checkout attempts" do
         successful_items = [
-            Domain.OrderItem(product=keyboard, quantity=1),
-            Domain.OrderItem(product=mouse, quantity=1),
+            Domain.OrderItem(product: keyboard, quantity: 1),
+            Domain.OrderItem(product: mouse, quantity: 1),
         ]
         successful_result = checkout!(
             customer,
             successful_items,
-            "HUMAN10",
+            coupon_code: "HUMAN10",
         )
         show_result(successful_result)
 
         print ""
         unavailable_items = [
-            Domain.OrderItem(product=keyboard, quantity=3),
+            Domain.OrderItem(product: keyboard, quantity: 3),
         ]
         unavailable_result = checkout!(customer, unavailable_items)
         show_result(unavailable_result)
 
         print ""
         expensive_items = [
-            Domain.OrderItem(product=monitor, quantity=1),
+            Domain.OrderItem(product: monitor, quantity: 1),
         ]
         payment_result = checkout!(
             customer,
             expensive_items,
-            payment_limit_cents=10000,
+            payment_limit_cents: 10000,
         )
         show_result(payment_result)
     end

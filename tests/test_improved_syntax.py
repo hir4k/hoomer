@@ -12,28 +12,34 @@ from tests.helpers import run_hoomer
 
 
 class ImprovedSyntaxTests(unittest.TestCase):
-    def test_expression_bodied_function_returns_its_expression(self) -> None:
-        source_code = """fn add(left, right) = left + right
-fn greeting(name="World") = "Hello {name}"
+    def test_traditional_functions_return_their_final_expression(self) -> None:
+        source_code = """fn add(left, right)
+    left + right
+end
+
+fn greeting(name: "World")
+    "Hello {name}"
+end
 
 print add(20, 22)
 print greeting()
-print greeting("Hirak")
+print greeting(name: "Hirak")
 """
 
         _, output, _ = run_hoomer(source_code)
 
         self.assertEqual(output, "42\nHello World\nHello Hirak\n")
 
-    def test_expression_bodied_function_is_an_explicit_return_in_the_ast(self) -> None:
-        program = Parser(
-            Lexer("fn answer() = 42\n", "expression_body.hmr").scan_tokens()
-        ).parse()
+    def test_expression_bodied_functions_are_rejected(self) -> None:
+        old_forms = ["fn answer() = 42\n", "fn answer = 42\n"]
+        for old_form in old_forms:
+            with self.subTest(old_form=old_form):
+                with self.assertRaises(ParserError) as caught_error:
+                    Parser(Lexer(old_form, "expression_body.hmr").scan_tokens()).parse()
 
-        function = program.statements[0]
-        self.assertIsInstance(function, ast.FunctionDefinition)
-        self.assertEqual(len(function.body), 1)
-        self.assertIsInstance(function.body[0], ast.ReturnStatement)
+                rendered_error = str(caught_error.exception)
+                self.assertIn("Functions use a body closed by `end`", rendered_error)
+                self.assertIn("expression-bodied function", rendered_error)
 
     def test_parameterless_block_function_may_omit_parentheses(self) -> None:
         source_code = """fn field(name, field_type)
@@ -53,12 +59,14 @@ change()
 
         self.assertEqual(output, "name: string\nusername: string\nage: int\n")
 
-    def test_public_expression_bodied_function_can_be_called_through_its_package(self) -> None:
+    def test_public_function_can_be_called_through_its_package(self) -> None:
         interpreter, output = Interpreter.capture_output()
         interpreter.execute_source(
             """package Numbers
 
-pub fn doubled(number) = number * 2
+pub fn doubled(number)
+    number * 2
+end
 """,
             "numbers.hmr",
         )
@@ -72,11 +80,11 @@ pub fn doubled(number) = number * 2
         self.assertEqual(output, "Hello\nWorld\n")
 
     def test_ordinary_calls_may_omit_parentheses_when_unambiguous(self) -> None:
-        source_code = """fn greet(name, punctuation: = "!")
-    return "Hello {name}{punctuation}"
+        source_code = """fn greet(name, punctuation: "!")
+    "Hello {name}{punctuation}"
 end
 
-message = greet "Hirak", punctuation="?"
+message = greet "Hirak", punctuation: "?"
 print message
 """
 
@@ -86,7 +94,7 @@ print message
 
     def test_struct_construction_cannot_omit_parentheses(self) -> None:
         source_code = """struct User name end
-User name="Hirak"
+User name: "Hirak"
 """
 
         with self.assertRaises(RuntimeHoomerError) as caught_error:
@@ -99,11 +107,11 @@ User name="Hirak"
 
 struct User
     name,
-    age=0,
+    age: 0,
 end
 
-point = Point(x=3, y=4)
-user = User(name="Hirak")
+point = Point(x: 3, y: 4)
+user = User(name: "Hirak")
 print point.x + point.y
 print user.age
 """
@@ -115,10 +123,10 @@ print user.age
     def test_struct_required_fields_and_named_only_construction_are_enforced(self) -> None:
         source_code = """struct User
     name,
-    age=0,
+    age: 0,
 end
 
-User(age=26)
+User(age: 26)
 """
         with self.assertRaises(RuntimeHoomerError) as missing_field_error:
             run_hoomer(source_code)
@@ -131,19 +139,19 @@ User("Hirak")
         with self.assertRaises(RuntimeHoomerError) as positional_error:
             run_hoomer(positional_source)
         self.assertIn("constructed with named fields", str(positional_error.exception))
-        self.assertIn("field_name=value", str(positional_error.exception))
+        self.assertIn("field_name: value", str(positional_error.exception))
 
-    def test_function_parameters_support_all_required_and_optional_forms(self) -> None:
+    def test_function_parameters_support_positional_and_named_forms(self) -> None:
         source_code = """fn describe(
-    prefix="Value",
+    prefix,
     value:,
-    punctuation: = "!",
+    punctuation: "!",
 )
-    return "{prefix}: {value}{punctuation}"
+    "{prefix}: {value}{punctuation}"
 end
 
-print describe(value="ready")
-print describe("Result", value="done", punctuation="?")
+print describe("Value", value: "ready")
+print describe("Result", value: "done", punctuation: "?")
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -169,7 +177,7 @@ connect()
     name
 end
 
-create(age=26, "Hirak")
+create(age: 26, "Hirak")
 """
 
         with self.assertRaises(RuntimeHoomerError) as caught_error:
@@ -181,7 +189,7 @@ create(age=26, "Hirak")
         )
 
     def test_parser_records_parameter_roles_without_encoded_markers(self) -> None:
-        source_code = """fn connect(retries=3, host:, port: = 5432)
+        source_code = """fn connect(retries, host:, port: 5432)
     host
 end
 """
@@ -197,9 +205,28 @@ end
             [parameter.is_named for parameter in function.parameters],
             [False, True, True],
         )
-        self.assertIsNotNone(function.parameters[0].default_value)
+        self.assertIsNone(function.parameters[0].default_value)
         self.assertIsNone(function.parameters[1].default_value)
         self.assertIsNotNone(function.parameters[2].default_value)
+
+    def test_positional_parameter_defaults_are_rejected(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer("fn connect(retries=3)\nend\n")
+
+        rendered_error = str(caught_error.exception)
+        self.assertIn("Positional parameters cannot have default values", rendered_error)
+        self.assertIn("retries: value", rendered_error)
+
+    def test_old_equals_named_syntax_reports_the_colon_replacement(self) -> None:
+        with self.assertRaises(ParserError) as call_error:
+            run_hoomer("fn greet(name:)\nend\ngreet(name=\"Hirak\")\n")
+
+        self.assertIn("Named arguments use `:`", str(call_error.exception))
+
+        with self.assertRaises(ParserError) as struct_error:
+            run_hoomer("struct User age=18 end\n")
+
+        self.assertIn("Struct field defaults follow `:`", str(struct_error.exception))
 
     def test_positional_parameters_cannot_follow_named_parameters(self) -> None:
         source_code = """fn invalid(host:, retries)
@@ -222,7 +249,7 @@ end
 
 pub struct User
     name,
-    city=nil,
+    city: nil,
 end
 """,
             "accounts.hmr",
@@ -230,12 +257,12 @@ end
         interpreter.execute_source(
             """import accounts
 
-user = Accounts.User(name="Hirak", city="Guwahati")
+user = Accounts.User(name: "Hirak", city: "Guwahati")
 
 when user
     Accounts.User as response
         print response.name
-    _
+    else
         print "wrong type"
 end
 
@@ -244,7 +271,7 @@ when user.city
         print "local match"
     nil
         print "missing"
-    _
+    else
         print "elsewhere"
 end
 """
@@ -261,14 +288,14 @@ struct DatabaseConnectionFailure
     message,
 end
 
-result = DatabaseConnection(host="localhost")
+result = DatabaseConnection(host: "localhost")
 database = when result
     DatabaseConnection as connection
         connection
     DatabaseConnectionFailure as error
         print error.message
         nil
-    _
+    else
         nil
 end
 
@@ -287,7 +314,38 @@ print database.host
 end
 """)
 
-        self.assertIn("final `_` branch", str(caught_error.exception))
+        self.assertIn("final `else` branch", str(caught_error.exception))
+
+    def test_when_else_can_bind_the_unmatched_value(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn describe(value)
+    when value
+        nil
+            "missing"
+        else as unexpected
+            "unexpected: {unexpected}"
+    end
+end
+
+print describe(42)
+"""
+        )
+
+        self.assertEqual(output, "unexpected: 42\n")
+
+    def test_when_else_must_be_the_final_branch(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer(
+                """when nil
+    else
+        print "fallback"
+    nil
+        print "unreachable"
+end
+"""
+            )
+
+        self.assertIn("must be the final branch", str(caught_error.exception))
 
     def test_inline_when_preserves_a_matching_struct_or_uses_nil(self) -> None:
         source_code = """struct DatabaseConnection host end
@@ -295,9 +353,9 @@ struct DatabaseConnectionError message end
 
 fn connect!(should_connect)
     if should_connect
-        return DatabaseConnection(host="localhost")
+        return DatabaseConnection(host: "localhost")
     else
-        return DatabaseConnectionError(message="offline")
+        return DatabaseConnectionError(message: "offline")
     end
 end
 
@@ -315,7 +373,7 @@ print missing_connection
         source_code = """struct User name end
 struct UserError message end
 
-result = UserError(message="missing")
+result = UserError(message: "missing")
 user = result when User
 print user
 """
@@ -329,10 +387,10 @@ print user
 struct CustomerNotFound message end
 
 fn find_customer!()
-    return CustomerNotFound(message="missing")
+    return CustomerNotFound(message: "missing")
 end
 
-customer = find_customer!() when Customer else Customer(name="Guest")
+customer = find_customer!() when Customer else Customer(name: "Guest")
 print customer.name
 """
 
@@ -345,7 +403,7 @@ print customer.name
 struct UserNotFound id end
 
 fn find_user!(id)
-    return UserNotFound(id=id)
+    return UserNotFound(id: id)
 end
 
 user = find_user! 10 when User
@@ -357,22 +415,22 @@ print user
         self.assertEqual(output, "nil\n")
 
     def test_inline_when_evaluates_its_value_once_and_fallback_lazily(self) -> None:
-        source_code = """struct Probe calls=0 end
+        source_code = """struct Probe calls: 0 end
 struct User name end
 struct UserError message end
 
 fn find_user!(probe, found)
     probe.calls = probe.calls + 1
     if found
-        return User(name="Hirak")
+        return User(name: "Hirak")
     else
-        return UserError(message="missing")
+        return UserError(message: "missing")
     end
 end
 
 fn guest_user(probe)
     probe.calls = probe.calls + 1
-    return User(name="Guest")
+    return User(name: "Guest")
 end
 
 probe = Probe()
@@ -398,7 +456,7 @@ print probe.calls
         interpreter.execute_source(
             """import accounts
 
-user = Accounts.User(name="Hirak") when Accounts.User
+user = Accounts.User(name: "Hirak") when Accounts.User
 answer = 42 when 42 else 0
 wrong_answer = 41 when 42 else 0
 print user.name
@@ -409,11 +467,11 @@ print wrong_answer
 
         self.assertEqual(output.getvalue(), "Hirak\n42\n0\n")
 
-    def test_inline_when_rejects_a_wildcard_pattern(self) -> None:
+    def test_inline_when_rejects_the_old_underscore_catch_all(self) -> None:
         with self.assertRaises(ParserError) as caught_error:
             run_hoomer("value = 42 when _\n")
 
-        self.assertIn("would always preserve", str(caught_error.exception))
+        self.assertIn("uses `else`", str(caught_error.exception))
 
     def test_fallible_result_must_be_used_or_explicitly_ignored(self) -> None:
         definition = """fn save_user!()
@@ -428,6 +486,40 @@ end
 
         _, _, _ = run_hoomer(definition + "ignore save_user!()\n")
 
+    def test_final_fallible_call_can_be_returned_implicitly(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn find_user!()
+    "Hirak"
+end
+
+fn forward_user!()
+    find_user!()
+end
+
+print forward_user!()
+"""
+        )
+
+        self.assertEqual(output, "Hirak\n")
+
+    def test_nonfinal_fallible_call_is_still_a_discarded_result(self) -> None:
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            run_hoomer(
+                """fn find_user!()
+    "Hirak"
+end
+
+fn wrapper()
+    find_user!()
+    "done"
+end
+
+print wrapper()
+"""
+            )
+
+        self.assertIn("result of fallible function", str(caught_error.exception))
+
     def test_ignore_rejects_an_ordinary_function(self) -> None:
         with self.assertRaises(RuntimeHoomerError) as caught_error:
             run_hoomer("""fn save_user()
@@ -441,13 +533,13 @@ ignore save_user()
     def test_lists_for_loops_and_continue_work_together(self) -> None:
         source_code = """struct User
     name,
-    active=true,
+    active: true,
 end
 
 users = [
-    User(name="Hirak"),
-    User(name="Hidden", active=false),
-    User(name="Rahul"),
+    User(name: "Hirak"),
+    User(name: "Hidden", active: false),
+    User(name: "Rahul"),
 ]
 
 for user in users
@@ -490,7 +582,7 @@ end
     def test_private_package_member_requires_pub(self) -> None:
         interpreter = Interpreter()
         interpreter.execute_source(
-            "package Accounts\n\nfn internal_helper() = \"hidden\"\n",
+            "package Accounts\n\nfn internal_helper()\n    \"hidden\"\nend\n",
             "accounts.hmr",
         )
 

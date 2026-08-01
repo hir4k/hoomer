@@ -6,6 +6,7 @@
   indentation-opening blocks.
 - Highlight unquoted slash-separated package paths such as
   `import kenekoi/accounts`.
+- Treat every `fn` declaration as a body opened until `end`.
 
 ## 0.1.1
 

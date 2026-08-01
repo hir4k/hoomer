@@ -3,9 +3,9 @@ package CheckoutDomain
 pub struct Customer
     name,
     email,
-    country="India",
-    premium=false,
-    loyalty_points=0,
+    country: "India",
+    premium: false,
+    loyalty_points: 0,
 end
 
 pub struct Product
@@ -31,7 +31,7 @@ pub struct Receipt
     subtotal_cents,
     discount_cents,
     charged_cents,
-    coupon_code=nil,
+    coupon_code: nil,
 end
 
 pub struct ValidationError message end

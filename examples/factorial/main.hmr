@@ -2,10 +2,10 @@ package Factorial
 
 fn factorial(number)
     if number <= 1
-        return 1
+        1
+    else
+        number * factorial(number - 1)
     end
-
-    return number * factorial(number - 1)
 end
 
 fn main

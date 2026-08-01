@@ -3,12 +3,12 @@ package Accounts
 MAX_NAME_LENGTH = 100
 
 pub struct User
-    id=nil,
+    id: nil,
     name,
     email,
-    age=0,
-    active=true,
-    city=nil,
+    age: 0,
+    active: true,
+    city: nil,
 end
 
 pub struct ValidationError
@@ -18,44 +18,46 @@ end
 
 pub struct DatabaseError
     message,
-    code=nil,
+    code: nil,
 end
 
-pub fn is_adult(user) = user.age >= 18
+pub fn is_adult(user)
+    user.age >= 18
+end
 
 pub fn create_user!(
     name,
     email,
-    age: = 0,
-    active: = true,
+    age: 0,
+    active: true,
 )
     if name == ""
         return ValidationError(
-            field="name",
-            message="Name cannot be empty",
+            field: "name",
+            message: "Name cannot be empty",
         )
     end
 
     if email == ""
         return ValidationError(
-            field="email",
-            message="Email cannot be empty",
+            field: "email",
+            message: "Email cannot be empty",
         )
     end
 
-    return User(
-        name=name,
-        email=email,
-        age=age,
-        active=active,
+    User(
+        name: name,
+        email: email,
+        age: age,
+        active: active,
     )
 end
 
 pub fn find_user!(id)
     if id <= 0
         return ValidationError(
-            field="id",
-            message="ID must be greater than zero",
+            field: "id",
+            message: "ID must be greater than zero",
         )
     end
 
@@ -65,28 +67,27 @@ pub fn find_user!(id)
 
     if id == 500
         return DatabaseError(
-            message="Database connection failed",
-            code=500,
+            message: "Database connection failed",
+            code: 500,
         )
     end
 
-    return User(
-        id=id,
-        name="Hirak",
-        email="hirak@example.com",
-        age=26,
+    User(
+        id: id,
+        name: "Hirak",
+        email: "hirak@example.com",
+        age: 26,
     )
 end
 
 pub fn greet(
     user,
-    greeting: = "Hello",
-    punctuation: = "!",
+    greeting: "Hello",
+    punctuation: "!",
 )
     if is_adult(user)
-        return "{greeting} {user.name}{punctuation}"
+        "{greeting} {user.name}{punctuation}"
     else
-        return "Hi {user.name}{punctuation}"
+        "Hi {user.name}{punctuation}"
     end
 end
-

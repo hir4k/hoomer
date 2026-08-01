@@ -145,7 +145,7 @@ class Parser:
                 f"The parameter list for `{name_token.lexeme}` is not closed.",
                 "`)`",
             )
-        elif not self._check(TokenType.NEWLINE):
+        elif not self._check_any(TokenType.NEWLINE, TokenType.ASSIGN):
             raise ParserError(
                 self._peek().location,
                 f"Function `{name_token.lexeme}` must put its parameters in parentheses.",
@@ -154,25 +154,16 @@ class Parser:
             )
 
         if self._match(TokenType.ASSIGN):
-            result_expression = self._parse_expression()
-            body = [
-                ast.ReturnStatement(
-                    result_expression.location,
-                    result_expression,
-                )
-            ]
-            return ast.FunctionDefinition(
-                function_token.location,
-                name_token.lexeme,
-                parameters,
-                body,
-                is_public,
+            raise ParserError(
+                self._previous().location,
+                "Functions use a body closed by `end`.",
+                expected="a newline after the function header, then a body and `end`",
+                found="an expression-bodied function using `=`",
             )
 
         self._require_line_after_header("function definition")
         body = self._parse_block_until(lambda: self._check(TokenType.END))
         self._consume(TokenType.END, "This function is missing its closing `end`.", "`end`")
-        self._validate_function_returns(name_token, body)
 
         return ast.FunctionDefinition(
             function_token.location,
@@ -188,21 +179,20 @@ class Parser:
     ) -> list[ast.FunctionParameterDefinition]:
         """Parse positional parameters first, followed by named parameters.
 
-        The four forms map directly to two independent facts:
+        The three forms make optional values visible at every call site:
 
         * ``name`` is required and positional.
-        * ``name=default`` is optional and positional.
         * ``name:`` is required and named.
-        * ``name: = default`` is optional and named.
+        * ``name: default`` is optional and named.
 
-        Keeping those facts explicit avoids a compact marker encoding that every
-        later reader would have to memorize.
+        Positional defaults are deliberately absent. A caller should never have
+        to remember what an omitted or overridden positional value represents.
         """
 
         parameters: list[ast.FunctionParameterDefinition] = []
         parameter_names: set[str] = set()
         has_seen_named_parameter = False
-        has_seen_optional_positional_parameter = False
+        has_seen_defaulted_named_parameter = False
         self._skip_newlines()
 
         while not self._check(TokenType.RIGHT_PARENTHESIS):
@@ -233,20 +223,37 @@ class Parser:
                 )
 
             default_value = None
-            if self._match(TokenType.ASSIGN):
-                default_value = self._parse_expression()
+            if is_named_parameter:
+                if self._match(TokenType.ASSIGN):
+                    raise ParserError(
+                        self._previous().location,
+                        "Named parameter defaults follow `:` directly.",
+                        expected=f"`{parameter_token.lexeme}: value`",
+                        found=f"`{parameter_token.lexeme}: = value`",
+                    )
 
-            is_optional_positional = not is_named_parameter and default_value is not None
-            is_required_positional = not is_named_parameter and default_value is None
-            if is_required_positional and has_seen_optional_positional_parameter:
-                raise ParserError(
-                    parameter_token.location,
-                    "A required positional parameter cannot follow an optional one.",
-                    expected="required positional parameters before parameters with defaults",
-                    found=parameter_token.lexeme,
+                named_parameter_is_required = self._check_any(
+                    TokenType.COMMA,
+                    TokenType.RIGHT_PARENTHESIS,
+                    TokenType.NEWLINE,
                 )
-            if is_optional_positional:
-                has_seen_optional_positional_parameter = True
+                if not named_parameter_is_required:
+                    default_value = self._parse_expression()
+                    has_seen_defaulted_named_parameter = True
+                elif has_seen_defaulted_named_parameter:
+                    raise ParserError(
+                        parameter_token.location,
+                        "A required named parameter cannot follow one with a default.",
+                        expected="required named parameters before named defaults",
+                        found=f"required named parameter `{parameter_token.lexeme}:`",
+                    )
+            elif self._match(TokenType.ASSIGN):
+                raise ParserError(
+                    self._previous().location,
+                    "Positional parameters cannot have default values.",
+                    expected=f"a named default such as `{parameter_token.lexeme}: value`",
+                    found=f"`{parameter_token.lexeme}=value`",
+                )
 
             parameters.append(
                 ast.FunctionParameterDefinition(
@@ -299,8 +306,26 @@ class Parser:
             field_names.add(field_token.lexeme)
 
             default_value = None
-            if self._match(TokenType.ASSIGN):
+            if self._match(TokenType.COLON):
+                if self._check_any(
+                    TokenType.COMMA,
+                    TokenType.NEWLINE,
+                    TokenType.END,
+                ):
+                    raise ParserError(
+                        self._previous().location,
+                        f"Struct field `{field_token.lexeme}` needs a default after `:`.",
+                        expected=f"`{field_token.lexeme}: value`",
+                        found="a field default without a value",
+                    )
                 default_value = self._parse_expression()
+            elif self._match(TokenType.ASSIGN):
+                raise ParserError(
+                    self._previous().location,
+                    "Struct field defaults follow `:`.",
+                    expected=f"`{field_token.lexeme}: value`",
+                    found=f"`{field_token.lexeme}=value`",
+                )
 
             fields.append(ast.StructFieldDefinition(field_token.lexeme, field_token.location, default_value))
 
@@ -616,7 +641,12 @@ class Parser:
         while not self._check(TokenType.END) and not self._is_at_end():
             if pattern_column is None:
                 pattern_column = self._peek().location.column
-            pattern = self._parse_when_pattern()
+
+            is_else_branch = self._match(TokenType.ELSE)
+            if is_else_branch:
+                pattern = ast.ElsePattern(self._previous().location)
+            else:
+                pattern = self._parse_when_pattern()
             binding_name = self._parse_when_binding()
             self._require_line_after_header("when pattern")
             branch_body = self._parse_block_until(
@@ -631,6 +661,16 @@ class Parser:
                 )
             branches.append(ast.WhenBranch(pattern, binding_name, branch_body))
 
+            if is_else_branch:
+                if not self._check(TokenType.END):
+                    raise ParserError(
+                        self._peek().location,
+                        "The `else` branch must be the final branch in `when`.",
+                        expected="`end` after the `else` branch",
+                        found="another branch after `else`",
+                    )
+                break
+
         self._consume(
             TokenType.END,
             "This `when` expression is missing its closing `end`.",
@@ -638,13 +678,13 @@ class Parser:
         )
         has_fallback = branches and isinstance(
             branches[-1].pattern,
-            ast.WildcardPattern,
+            ast.ElsePattern,
         )
         if not has_fallback:
             raise ParserError(
                 when_token.location,
-                "Every `when` expression needs a final `_` branch.",
-                expected="`_` as the final pattern",
+                "Every `when` expression needs a final `else` branch.",
+                expected="`else` as the final branch",
                 found="a `when` expression without a fallback",
             )
         return ast.WhenExpression(when_token.location, matched_expression, branches)
@@ -665,7 +705,12 @@ class Parser:
         if self._match(TokenType.NIL):
             return ast.NilPattern(self._previous().location)
         if self._match(TokenType.WILDCARD):
-            return ast.WildcardPattern(self._previous().location)
+            raise ParserError(
+                self._previous().location,
+                "`when` uses `else` for its catch-all branch.",
+                expected="`else` as the final branch",
+                found="`_`",
+            )
         if self._match(TokenType.STRING, TokenType.NUMBER):
             literal_token = self._previous()
             return ast.LiteralPattern(literal_token.literal, literal_token.location)
@@ -688,8 +733,11 @@ class Parser:
 
         raise ParserError(
             self._peek().location,
-            "A `when` branch must begin with a struct, literal, `nil`, or `_`.",
-            expected="a pattern such as `Accounts.User`, `\"Guwahati\"`, `nil`, or `_`",
+            "A `when` branch must begin with a struct, literal, `nil`, or `else`.",
+            expected=(
+                "a pattern such as `Accounts.User`, `\"Guwahati\"`, `nil`, "
+                "or `else`"
+            ),
             found=self._peek().describe(),
         )
 
@@ -700,8 +748,8 @@ class Parser:
             return False
 
         single_token_patterns = {
+            TokenType.ELSE,
             TokenType.NIL,
-            TokenType.WILDCARD,
             TokenType.STRING,
             TokenType.NUMBER,
             TokenType.TRUE,
@@ -858,13 +906,6 @@ class Parser:
 
         when_token = self._previous()
         pattern = self._parse_when_pattern()
-        if isinstance(pattern, ast.WildcardPattern):
-            raise ParserError(
-                pattern.location,
-                "An inline `when` wildcard would always preserve the original value.",
-                expected="a meaningful struct, literal, or `nil` pattern",
-                found="`_`",
-            )
 
         fallback_expression = None
         if self._match(TokenType.ELSE):
@@ -920,15 +961,28 @@ class Parser:
         encountered_named_argument = False
         while True:
             argument_name = None
-            begins_named_argument = (
+            uses_old_named_argument = (
                 self._check(TokenType.IDENTIFIER)
                 and self._peek_next().token_type is TokenType.ASSIGN
+            )
+            if uses_old_named_argument:
+                argument_token = self._peek()
+                raise ParserError(
+                    self._peek_next().location,
+                    "Named arguments use `:`.",
+                    expected=f"`{argument_token.lexeme}: value`",
+                    found=f"`{argument_token.lexeme}=value`",
+                )
+
+            begins_named_argument = (
+                self._check(TokenType.IDENTIFIER)
+                and self._peek_next().token_type is TokenType.COLON
             )
             if begins_named_argument:
                 argument_token = self._advance()
                 argument_name = argument_token.lexeme
                 validate_variable_name(argument_name, argument_token.location)
-                self._advance()
+                self._advance()  # The lookahead above already proved this is `:`.
                 encountered_named_argument = True
             elif encountered_named_argument:
                 raise ParserError(
@@ -1075,14 +1129,27 @@ class Parser:
         if not self._check(TokenType.RIGHT_PARENTHESIS):
             while True:
                 argument_name = None
-                begins_named_argument = (
+                uses_old_named_argument = (
                     self._check(TokenType.IDENTIFIER)
                     and self._peek_next().token_type is TokenType.ASSIGN
+                )
+                if uses_old_named_argument:
+                    argument_token = self._peek()
+                    raise ParserError(
+                        self._peek_next().location,
+                        "Named arguments use `:`.",
+                        expected=f"`{argument_token.lexeme}: value`",
+                        found=f"`{argument_token.lexeme}=value`",
+                    )
+
+                begins_named_argument = (
+                    self._check(TokenType.IDENTIFIER)
+                    and self._peek_next().token_type is TokenType.COLON
                 )
                 if begins_named_argument:
                     argument_name = self._advance().lexeme
                     validate_variable_name(argument_name, self._previous().location)
-                    self._advance()  # The lookahead above already proved this is `=`.
+                    self._advance()  # The lookahead above already proved this is `:`.
 
                 argument_value = self._parse_expression()
                 arguments.append(ast.CallArgument(argument_value, argument_name))
@@ -1156,24 +1223,6 @@ class Parser:
         )
         return ast.ListExpression(opening_bracket.location, items)
 
-    def _validate_function_returns(
-        self,
-        name_token: Token,
-        body: list[ast.Statement],
-    ) -> None:
-        outcomes = self._block_outcomes(body)
-        returns_a_value = "value" in outcomes
-        every_path_returns_a_value = outcomes == {"value"}
-        if not returns_a_value or every_path_returns_a_value:
-            return
-
-        raise ParserError(
-            name_token.location,
-            f"Function `{name_token.lexeme}` returns a value on only some paths.",
-            expected="an explicit `return value` on every completion path",
-            found="a path that reaches `end` or uses bare `return`",
-        )
-
     def _validate_unique_function_names(
         self,
         statements: list[ast.Statement],
@@ -1243,105 +1292,6 @@ class Parser:
 
         for child_expression in child_expressions:
             self._validate_functions_in_expression(child_expression)
-
-    def _block_outcomes(self, statements: list[ast.Statement]) -> set[str]:
-        outcomes = {"continue"}
-        for statement in statements:
-            if "continue" not in outcomes:
-                break
-            outcomes.remove("continue")
-            outcomes.update(self._statement_outcomes(statement))
-        return outcomes
-
-    def _statement_outcomes(self, statement: ast.Statement) -> set[str]:
-        if isinstance(statement, ast.ReturnStatement):
-            if statement.expression is None:
-                return {"nil"}
-
-            expression_outcomes = self._expression_outcomes(statement.expression)
-            outcomes = expression_outcomes - {"continue"}
-            if "continue" in expression_outcomes:
-                outcomes.add("value")
-            return outcomes
-
-        if isinstance(statement, ast.IfStatement):
-            outcomes: set[str] = set()
-            for branch in statement.branches:
-                outcomes.update(self._block_outcomes(branch.body))
-            if statement.else_body is None:
-                outcomes.add("continue")
-            else:
-                outcomes.update(self._block_outcomes(statement.else_body))
-            return outcomes
-
-        if isinstance(statement, ast.ForStatement):
-            return {"continue"} | (self._block_outcomes(statement.body) - {"continue"})
-
-        if isinstance(statement, ast.ExpressionStatement):
-            return self._expression_outcomes(statement.expression)
-        if isinstance(statement, ast.PrintStatement):
-            return self._expression_outcomes(statement.expression)
-        if isinstance(statement, ast.IgnoreStatement):
-            return self._expression_outcomes(statement.expression)
-
-        return {"continue"}
-
-    def _expression_outcomes(self, expression: ast.Expression) -> set[str]:
-        if isinstance(expression, ast.WhenExpression):
-            outcomes: set[str] = set()
-            matched_outcomes = self._expression_outcomes(expression.matched_expression)
-            outcomes.update(matched_outcomes - {"continue"})
-            if "continue" in matched_outcomes:
-                for branch in expression.branches:
-                    outcomes.update(self._block_outcomes(branch.body))
-            return outcomes
-
-        if isinstance(expression, ast.InlineWhenExpression):
-            outcomes: set[str] = set()
-            matched_outcomes = self._expression_outcomes(expression.matched_expression)
-            outcomes.update(matched_outcomes - {"continue"})
-            if "continue" not in matched_outcomes:
-                return outcomes
-
-            # A successful pattern preserves the matched value and continues.
-            outcomes.add("continue")
-            if expression.fallback_expression is not None:
-                fallback_outcomes = self._expression_outcomes(
-                    expression.fallback_expression
-                )
-                outcomes.update(fallback_outcomes - {"continue"})
-            return outcomes
-
-        child_expressions: list[ast.Expression] = []
-        if isinstance(expression, ast.UnaryExpression):
-            child_expressions = [expression.operand]
-        elif isinstance(expression, ast.BinaryExpression):
-            child_expressions = [expression.left_operand, expression.right_operand]
-        elif isinstance(expression, ast.AssignmentExpression):
-            child_expressions = [expression.value]
-            if isinstance(expression.target, ast.FieldAccessExpression):
-                child_expressions.append(expression.target.target)
-        elif isinstance(expression, ast.CallExpression):
-            child_expressions = [expression.callable_expression]
-            child_expressions.extend(
-                argument.value
-                for argument in expression.arguments
-                if not isinstance(argument.value, ast.BlockExpression)
-            )
-        elif isinstance(expression, ast.FieldAccessExpression):
-            child_expressions = [expression.target]
-        elif isinstance(expression, ast.ListExpression):
-            child_expressions = expression.items
-        elif isinstance(expression, ast.RangeExpression):
-            child_expressions = [expression.first_value, expression.last_value]
-
-        outcomes = {"continue"}
-        for child_expression in child_expressions:
-            if "continue" not in outcomes:
-                break
-            outcomes.remove("continue")
-            outcomes.update(self._expression_outcomes(child_expression))
-        return outcomes
 
     def _parse_dotted_name(self, explanation: str) -> list[Token]:
         first_name = self._consume(TokenType.IDENTIFIER, explanation, "a name")

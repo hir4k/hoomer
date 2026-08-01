@@ -85,8 +85,8 @@ class ParserTests(unittest.TestCase):
     def test_parser_supports_multiline_named_struct_arguments(self) -> None:
         program = parse(
             """user = User(
-    name="Hirak",
-    age=26,
+    name: "Hirak",
+    age: 26,
 )
 """
         )

@@ -1,12 +1,16 @@
 package Fibonacci
 
-fn print_fibonacci(remaining, current=0, next=1)
+fn print_fibonacci(remaining, current: 0, next: 1)
     if remaining <= 0
         return
     end
 
     print current
-    print_fibonacci(remaining - 1, next, current + next)
+    print_fibonacci(
+        remaining - 1,
+        current: next,
+        next: current + next,
+    )
 end
 
 fn main
