@@ -1,0 +1,13 @@
+package User
+
+import examples/example
+
+fn main
+    user = Example.User(
+        name="Hirakjyoti Das 😍",
+        age=26,
+    )
+
+    message = Example.greet(user, from="Baruapara")
+    print message
+end

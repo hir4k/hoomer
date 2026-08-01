@@ -41,7 +41,7 @@ class Environment:
             raise RuntimeHoomerError(
                 error_location,
                 f"The name `{name}` is already defined in this scope.",
-                expected="a new name, or another function overload with a different arity",
+                expected="a unique name in this scope",
                 found=name,
             )
 
@@ -53,7 +53,7 @@ class Environment:
             raise RuntimeHoomerError(
                 location,
                 f"The name `{name}` has not been defined.",
-                expected="a variable, function, struct, module, or imported name in scope",
+                expected="a variable, function, struct, package, or imported name in scope",
                 found=name,
             )
         return environment_with_name._bindings[name].value
@@ -106,4 +106,3 @@ class Environment:
 
 def _is_constant_name(name: str) -> bool:
     return name.isupper() and any(character.isalpha() for character in name)
-

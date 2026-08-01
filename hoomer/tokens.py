@@ -19,6 +19,7 @@ class TokenType(Enum):
     RIGHT_BRACKET = auto()
     COMMA = auto()
     DOT = auto()
+    RANGE = auto()
     COLON = auto()
     PLUS = auto()
     MINUS = auto()
@@ -39,7 +40,7 @@ class TokenType(Enum):
     STRING = auto()
     NUMBER = auto()
 
-    MODULE = auto()
+    PACKAGE = auto()
     IMPORT = auto()
     STRUCT = auto()
     FUNCTION = auto()
@@ -51,6 +52,7 @@ class TokenType(Enum):
     AS = auto()
     DO = auto()
     RETURN = auto()
+    IGNORE = auto()
     PUBLIC = auto()
     FOR = auto()
     IN = auto()
@@ -64,7 +66,7 @@ class TokenType(Enum):
 
 
 KEYWORD_TOKEN_TYPES: dict[str, TokenType] = {
-    "module": TokenType.MODULE,
+    "package": TokenType.PACKAGE,
     "import": TokenType.IMPORT,
     "struct": TokenType.STRUCT,
     "fn": TokenType.FUNCTION,
@@ -76,6 +78,7 @@ KEYWORD_TOKEN_TYPES: dict[str, TokenType] = {
     "as": TokenType.AS,
     "do": TokenType.DO,
     "return": TokenType.RETURN,
+    "ignore": TokenType.IGNORE,
     "pub": TokenType.PUBLIC,
     "for": TokenType.FOR,
     "in": TokenType.IN,

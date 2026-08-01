@@ -1,0 +1,50 @@
+package PrimeNumbers
+
+fn is_divisible(number, divisor)
+    if number == 0
+        return true
+    end
+
+    if number < 0
+        return false
+    end
+
+    return is_divisible(number - divisor, divisor)
+end
+
+fn has_no_divisor(number, candidate)
+    if candidate * candidate > number
+        return true
+    end
+
+    if is_divisible(number, candidate)
+        return false
+    end
+
+    return has_no_divisor(number, candidate + 1)
+end
+
+fn is_prime(number)
+    if number < 2
+        return false
+    end
+
+    return has_no_divisor(number, 2)
+end
+
+fn print_primes(number, limit)
+    if number > limit
+        return
+    end
+
+    if is_prime(number)
+        print number
+    end
+
+    print_primes(number + 1, limit)
+end
+
+fn main
+    print "Prime numbers up to 50:"
+    print_primes(2, 50)
+end

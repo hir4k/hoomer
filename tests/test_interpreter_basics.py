@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from hoomer.errors import RuntimeHoomerError
+from hoomer.errors import ParserError, RuntimeHoomerError
 from tests.helpers import run_hoomer
 
 
@@ -25,17 +25,13 @@ end
         self.assertEqual(output, "Hello Hirak, score: 11\n")
 
 
-    def test_functions_support_automatic_return_explicit_return_and_overloading(self) -> None:
+    def test_functions_use_explicit_returns_and_default_parameters(self) -> None:
         _, output, _ = run_hoomer(
-            """fn greet()
-    "Hello"
-end
-
-fn greet(name)
+            """fn greet(name="World")
     if name == ""
         return "Hello, stranger"
     end
-    "Hello, {name}"
+    return "Hello, {name}"
 end
 
 print greet()
@@ -44,27 +40,41 @@ print greet("")
 """
         )
 
-        self.assertEqual(output, "Hello\nHello, Hirak\nHello, stranger\n")
+        self.assertEqual(output, "Hello, World\nHello, Hirak\nHello, stranger\n")
 
-
-    def test_predicate_function_must_return_a_boolean(self) -> None:
-        with self.assertRaises(RuntimeHoomerError) as caught_error:
-            run_hoomer(
-                """fn active?(user)
-    "yes"
+    def test_final_expression_is_not_returned_automatically(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn answer()
+    42
 end
 
-active?(nil)
+print answer()
+"""
+        )
+
+        self.assertEqual(output, "nil\n")
+
+    def test_if_conditions_require_a_boolean(self) -> None:
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            run_hoomer(
+                """fn user_age()
+    return 26
+end
+
+if user_age()
+    print "adult"
+end
 """
             )
 
-        self.assertIn("Predicate function `active?`", str(caught_error.exception))
-        self.assertIn("instead of a boolean", str(caught_error.exception))
+        rendered_error = str(caught_error.exception)
+        self.assertIn("condition must produce a boolean", rendered_error)
+        self.assertIn("Found:\n    number", rendered_error)
 
     def test_fallible_function_marker_is_runtime_metadata(self) -> None:
         _, _, interpreter = run_hoomer(
             """fn save_user!(user)
-    user
+    return user
 end
 """
         )
@@ -72,20 +82,68 @@ end
         runtime_function = interpreter.global_environment.get_local("save_user!")
         self.assertTrue(runtime_function.is_fallible)
 
-    def test_overloads_with_the_same_arity_are_rejected(self) -> None:
-        with self.assertRaises(RuntimeHoomerError) as caught_error:
+    def test_second_function_definition_is_rejected(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
             run_hoomer(
                 """fn greet(name)
-    name
+    return name
 end
 
-fn greet(person)
-    person
+fn greet(first_name, last_name)
+    return "{first_name} {last_name}"
 end
 """
             )
 
-        self.assertIn("overload accepting the same arguments", str(caught_error.exception))
+        self.assertIn("already defined", str(caught_error.exception))
+        self.assertIn("one definition", str(caught_error.exception))
+
+    def test_value_returning_function_must_return_on_every_path(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer(
+                """fn find_name(found)
+    if found
+        return "Hirak"
+    end
+end
+"""
+            )
+
+        rendered_error = str(caught_error.exception)
+        self.assertIn("only some paths", rendered_error)
+        self.assertIn("explicit `return value`", rendered_error)
+
+    def test_value_returning_function_accepts_complete_if_paths(self) -> None:
+        _, output, _ = run_hoomer(
+            """fn label(ready)
+    if ready
+        return "ready"
+    else
+        return "waiting"
+    end
+end
+
+print label(true)
+print label(false)
+"""
+        )
+
+        self.assertEqual(output, "ready\nwaiting\n")
+
+    def test_bare_return_is_not_a_value_return_path(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer(
+                """fn find_name(found)
+    if found
+        return "Hirak"
+    else
+        return
+    end
+end
+"""
+            )
+
+        self.assertIn("bare `return`", str(caught_error.exception))
 
 
     def test_constants_cannot_be_reassigned(self) -> None:

@@ -1,0 +1,46 @@
+{
+  "name": "hoomer-language",
+  "displayName": "Hoomer Language",
+  "description": "Syntax highlighting and basic editor support for the Hoomer language.",
+  "version": "0.2.0",
+  "publisher": "hoomer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hir4k/hoomer.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "hoomer",
+    "language",
+    "syntax-highlighting"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "hoomer",
+        "aliases": [
+          "Hoomer",
+          "hoomer"
+        ],
+        "extensions": [
+          ".hmr"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "hoomer",
+        "scopeName": "source.hoomer",
+        "path": "./syntaxes/hoomer.tmLanguage.json"
+      }
+    ]
+  }
+}

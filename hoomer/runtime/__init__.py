@@ -1,18 +1,16 @@
 """Runtime building blocks used by :mod:`hoomer.interpreter`."""
 
 from hoomer.runtime.environment import Environment
-from hoomer.runtime.functions import FunctionGroup, NativeFunction, RuntimeFunction
-from hoomer.runtime.modules import ModuleRegistry, RuntimeModule
+from hoomer.runtime.functions import NativeFunction, RuntimeFunction
+from hoomer.runtime.packages import PackageRegistry, RuntimePackage
 from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 
 __all__ = [
     "Environment",
-    "FunctionGroup",
-    "ModuleRegistry",
+    "PackageRegistry",
     "NativeFunction",
     "RuntimeFunction",
-    "RuntimeModule",
+    "RuntimePackage",
     "RuntimeStructDefinition",
     "RuntimeStructInstance",
 ]
-

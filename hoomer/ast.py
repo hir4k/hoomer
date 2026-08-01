@@ -16,6 +16,8 @@ from hoomer.errors import SourceLocation
 @dataclass(slots=True)
 class Program:
     statements: list[Statement]
+    package_name: str | None = None
+    package_location: SourceLocation | None = None
 
 
 @dataclass(slots=True)
@@ -84,6 +86,12 @@ class ListExpression(Expression):
 
 
 @dataclass(slots=True)
+class RangeExpression(Expression):
+    first_value: Expression
+    last_value: Expression
+
+
+@dataclass(slots=True)
 class Statement:
     location: SourceLocation
 
@@ -96,6 +104,11 @@ class ExpressionStatement(Statement):
 @dataclass(slots=True)
 class PrintStatement(Statement):
     expression: Expression
+
+
+@dataclass(slots=True)
+class IgnoreStatement(Statement):
+    expression: CallExpression
 
 
 @dataclass(slots=True)
@@ -140,15 +153,8 @@ class StructDefinition(Statement):
 
 
 @dataclass(slots=True)
-class ModuleDefinition(Statement):
-    name_path: list[str]
-    body: list[Statement]
-    is_public: bool = False
-
-
-@dataclass(slots=True)
 class ImportStatement(Statement):
-    name_path: list[str]
+    package_path: str
     alias: str | None = None
     selected_names: list[str] = field(default_factory=list)
 
@@ -205,11 +211,20 @@ WhenPattern: TypeAlias = StructPattern | LiteralPattern | NilPattern | WildcardP
 @dataclass(slots=True)
 class WhenBranch:
     pattern: WhenPattern
+    binding_name: str | None
     body: list[Statement]
 
 
 @dataclass(slots=True)
-class WhenStatement(Statement):
+class WhenExpression(Expression):
     matched_expression: Expression
-    binding_name: str | None
     branches: list[WhenBranch]
+
+
+@dataclass(slots=True)
+class InlineWhenExpression(Expression):
+    """Keep a matching value or produce a short fallback expression."""
+
+    matched_expression: Expression
+    pattern: WhenPattern
+    fallback_expression: Expression | None

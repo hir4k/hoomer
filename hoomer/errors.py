@@ -70,7 +70,7 @@ class NamingHoomerError(HoomerError):
     error_kind = "Naming error"
 
 
-class ModuleContentError(HoomerError):
-    """Raised when an action appears inside a declarative module body."""
+class PackageContentError(HoomerError):
+    """Raised when a package file violates declarative package rules."""
 
     error_kind = "Hoomer Error"

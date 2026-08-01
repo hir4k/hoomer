@@ -1,0 +1,80 @@
+package MiniRecord
+
+pub struct Model
+    name,
+    table,
+    fields,
+end
+
+pub struct Query
+    model,
+    statement,
+end
+
+pub struct ModelMismatchError
+    table,
+    expected_model,
+    received_model,
+end
+
+pub fn model(sample_record, table:)
+    record_info = reflect(sample_record)
+
+    return Model(
+        name=record_info.name,
+        table=table,
+        fields=record_info.fields,
+    )
+end
+
+pub fn migrate(model)
+    print "Model {model.name} maps to {model.table}"
+    print "Fields: {model.fields}"
+end
+
+pub fn create!(model, record)
+    record_info = reflect(record)
+
+    if record_info.name != model.name
+        return ModelMismatchError(
+            table=model.table,
+            expected_model=model.name,
+            received_model=record_info.name,
+        )
+    end
+
+    print "Inserted {record_info.name} into {model.table}"
+    return record
+end
+
+pub fn all(model)
+    return Query(
+        model=model,
+        statement="SELECT * FROM {model.table}",
+    )
+end
+
+pub fn where(query, field:, equals:)
+    return Query(
+        model=query.model,
+        statement="{query.statement} WHERE {field} = {equals}",
+    )
+end
+
+pub fn limit(query, count=100)
+    return Query(
+        model=query.model,
+        statement="{query.statement} LIMIT {count}",
+    )
+end
+
+pub fn execute(query)
+    print query.statement
+end
+
+pub fn transaction(block)
+    print "BEGIN"
+    block()
+    print "COMMIT"
+end
+

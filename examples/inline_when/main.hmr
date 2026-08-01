@@ -1,0 +1,46 @@
+package InlineWhen
+
+struct DatabaseConnection
+    host,
+end
+
+struct DatabaseConnectionError
+    message,
+end
+
+fn connect_database!(host, available: = true)
+    if available
+        return DatabaseConnection(host=host)
+    end
+
+    return DatabaseConnectionError(
+        message="Could not connect to {host}",
+    )
+end
+
+fn create_offline_connection()
+    print "Creating offline connection"
+    return DatabaseConnection(host="offline")
+end
+
+fn main
+    primary_connection = connect_database!(
+        "primary.database.local",
+    ) when DatabaseConnection else create_offline_connection()
+
+    print "Matched: {primary_connection.host}"
+
+    missing_connection = connect_database!(
+        "missing.database.local",
+        available=false,
+    ) when DatabaseConnection
+
+    print "Without fallback: {missing_connection}"
+
+    fallback_connection = connect_database!(
+        "backup.database.local",
+        available=false,
+    ) when DatabaseConnection else create_offline_connection()
+
+    print "With fallback: {fallback_connection.host}"
+end

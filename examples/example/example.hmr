@@ -1,0 +1,13 @@
+package Example
+pub struct User
+    name,
+    age,
+end
+
+pub fn greet(user, from:)
+    if user.age >= 18
+        return "Hello {user.name}, from {from}"
+    else
+        return "Hi {user.name}"
+    end
+end

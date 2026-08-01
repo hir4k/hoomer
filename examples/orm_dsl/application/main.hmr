@@ -1,0 +1,62 @@
+package Application
+
+import examples/orm_dsl/mini_record as Database
+
+pub struct User
+    name,
+    email,
+    active=true,
+end
+
+struct AuditEvent
+    message,
+end
+
+fn show_create_error(result)
+    when result
+        Database.ModelMismatchError as error
+            print "Model mismatch: {error.table} accepts {error.expected_model}, not {error.received_model}"
+
+        _
+            print "Unexpected create result"
+    end
+end
+
+fn main
+    user_model = Database.model(
+        User(name="", email=""),
+        table="users",
+    )
+
+    Database.migrate(user_model)
+
+    Database.transaction() do
+        create_result = Database.create!(
+            user_model,
+            User(
+                name="Hirak",
+                email="hirak@example.com",
+            ),
+        )
+        created_user = create_result when User
+        print "Created: {created_user.name}"
+
+        wrong_result = Database.create!(
+            user_model,
+            AuditEvent(message="Signed in"),
+        )
+        show_create_error(wrong_result)
+
+        filtered_user = wrong_result when User
+        print "Filtered wrong record: {filtered_user}"
+    end
+
+    query = Database.all(user_model)
+    query = Database.where(
+        query,
+        field="active",
+        equals=true,
+    )
+    query = Database.limit(query, 10)
+    Database.execute(query)
+end

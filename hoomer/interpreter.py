@@ -10,25 +10,25 @@ from pathlib import Path
 from typing import TextIO
 
 from hoomer import ast
-from hoomer.errors import HoomerError, RuntimeHoomerError, SourceLocation
+from hoomer.errors import HoomerError, PackageContentError, RuntimeHoomerError, SourceLocation
 from hoomer.lexer import Lexer
+from hoomer.naming import SNAKE_CASE_PATTERN
 from hoomer.parser import Parser
 from hoomer.runtime.environment import Environment
 from hoomer.runtime.functions import (
-    FunctionGroup,
     NativeFunction,
     ReturnFromFunction,
     RuntimeBlock,
     RuntimeFunction,
 )
-from hoomer.runtime.modules import ModuleRegistry, RuntimeModule
+from hoomer.runtime.packages import PackageRegistry, RuntimePackage
 from hoomer.runtime.reflection import ReflectionValue, reflect_runtime_value
 from hoomer.runtime.structs import (
     RuntimeFieldDefinition,
     RuntimeStructDefinition,
     RuntimeStructInstance,
 )
-from hoomer.runtime.values import format_runtime_value, is_truthy, runtime_type_name
+from hoomer.runtime.values import format_runtime_value, runtime_type_name
 
 
 class ContinueLoop(Exception):
@@ -39,26 +39,28 @@ class Interpreter:
     """Own runtime state and evaluate Hoomer AST nodes.
 
     One interpreter instance is one Hoomer process. Its global environment,
-    module registry, and import cache intentionally survive multiple
-    ``execute_source`` calls; that is what lets the REPL remember earlier lines
-    and imported files refer to modules loaded earlier in the process.
+    package registry, and import cache intentionally survive multiple
+    ``execute_source`` calls. That lets the REPL remember earlier lines and
+    avoids loading the same package twice.
     """
 
     def __init__(
         self,
         *,
         output: TextIO | None = None,
-        module_search_paths: Iterable[str | Path] | None = None,
+        package_search_paths: Iterable[str | Path] | None = None,
     ) -> None:
         self.output = output or sys.stdout
         self.global_environment = Environment()
-        self.module_registry = ModuleRegistry(self.global_environment)
-        self.module_search_paths = [
+        self.package_registry = PackageRegistry(self.global_environment)
+        self.package_search_paths = [
             Path(search_path).resolve()
-            for search_path in (module_search_paths or [Path.cwd()])
+            for search_path in (package_search_paths or [Path.cwd()])
         ]
-        self._files_being_loaded: set[Path] = set()
-        self._loaded_files: set[Path] = set()
+        self.project_root: Path | None = None
+        self._package_directories_being_loaded: set[Path] = set()
+        self._package_paths_being_loaded: set[str] = set()
+        self._loaded_package_directories: dict[Path, RuntimePackage] = {}
         self._function_call_depth = 0
         self._loop_depth = 0
         self._install_builtins()
@@ -67,13 +69,13 @@ class Interpreter:
     def capture_output(
         cls,
         *,
-        module_search_paths: Iterable[str | Path] | None = None,
+        package_search_paths: Iterable[str | Path] | None = None,
     ) -> tuple[Interpreter, io.StringIO]:
         """Convenience constructor for tests and embedding applications."""
 
         output_buffer = io.StringIO()
         return (
-            cls(output=output_buffer, module_search_paths=module_search_paths),
+            cls(output=output_buffer, package_search_paths=package_search_paths),
             output_buffer,
         )
 
@@ -83,8 +85,32 @@ class Interpreter:
 
     def execute_file(self, file_path: str | Path) -> object:
         resolved_path = Path(file_path).resolve()
-        source_program = self._parse_file(resolved_path)
-        return self._execute_program_from_file(source_program, resolved_path)
+        raise PackageContentError(
+            SourceLocation(str(resolved_path), 1, 1),
+            "An individual package file cannot be executed.",
+            expected=f"the package directory `{resolved_path.parent}`",
+            found=str(resolved_path),
+        )
+
+    def execute_package(self, package_directory: str | Path) -> object:
+        resolved_directory = Path(package_directory).resolve()
+        import_path = self._prepare_local_package(resolved_directory)
+        return self._load_package_directory(
+            resolved_directory,
+            import_path,
+            SourceLocation(str(package_directory), 1, 1),
+            invoke_main=True,
+        )
+
+    def check_package(self, package_directory: str | Path) -> object:
+        resolved_directory = Path(package_directory).resolve()
+        import_path = self._prepare_local_package(resolved_directory)
+        return self._load_package_directory(
+            resolved_directory,
+            import_path,
+            SourceLocation(str(package_directory), 1, 1),
+            invoke_main=False,
+        )
 
     @staticmethod
     def _parse_source(source_code: str, file_name: str) -> ast.Program:
@@ -95,29 +121,15 @@ class Interpreter:
         source_code = resolved_path.read_text(encoding="utf-8")
         return self._parse_source(source_code, str(resolved_path))
 
-    def _execute_program_from_file(
-        self,
-        source_program: ast.Program,
-        resolved_path: Path,
-    ) -> object:
-        original_search_paths = list(self.module_search_paths)
-
-        # Imports are normally written relative to the source file being run.
-        # Temporarily checking its directory first makes ``hoomer run app/main.hmr``
-        # behave the same regardless of the shell's current working directory.
-        source_directory = resolved_path.parent
-        if source_directory not in self.module_search_paths:
-            self.module_search_paths.insert(0, source_directory)
-
-        try:
-            result = self.execute_program(source_program)
-            self._loaded_files.add(resolved_path)
-            return result
-        finally:
-            self.module_search_paths = original_search_paths
-
     def execute_program(self, program: ast.Program) -> object:
         try:
+            if program.package_name is not None:
+                import_path = self._package_name_to_directory_name(program.package_name)
+                return self._install_package_programs(
+                    [program],
+                    import_path=import_path,
+                    source_directory=None,
+                )
             return self.execute_statements(program.statements, self.global_environment)
         except ReturnFromFunction as return_signal:
             # The parser accepts ``return`` wherever a statement may occur so it
@@ -129,6 +141,300 @@ class Interpreter:
                 expected="`return` inside `fn ... end` or `do ... end`",
                 found=format_runtime_value(return_signal.value),
             ) from None
+
+    def _prepare_local_package(self, package_directory: Path) -> str:
+        discovered_root = self._find_project_root(package_directory)
+        if self.project_root is None:
+            self.project_root = discovered_root
+        elif self.project_root != discovered_root:
+            raise PackageContentError(
+                SourceLocation(str(package_directory), 1, 1),
+                "One interpreter process cannot run packages from two project roots.",
+                expected=str(self.project_root),
+                found=str(discovered_root),
+            )
+
+        project_root_name = self.project_root.name
+        if SNAKE_CASE_PATTERN.fullmatch(project_root_name) is None:
+            raise PackageContentError(
+                SourceLocation(str(self.project_root), 1, 1),
+                "A project-root directory name must use snake_case.",
+                expected="a name such as `kenekoi` or `billing_service`",
+                found=project_root_name,
+            )
+
+        if self.project_root.parent not in self.package_search_paths:
+            self.package_search_paths.append(self.project_root.parent)
+
+        relative_directory = package_directory.relative_to(self.project_root)
+        relative_parts = list(relative_directory.parts)
+        invalid_part = None
+        for part in relative_parts:
+            if SNAKE_CASE_PATTERN.fullmatch(part) is None:
+                invalid_part = part
+                break
+        if invalid_part is not None:
+            raise PackageContentError(
+                SourceLocation(str(package_directory), 1, 1),
+                "Directories inside a Hoomer package path must use snake_case.",
+                expected="path segments such as `accounts` or `login_service`",
+                found=invalid_part,
+            )
+
+        return "/".join([project_root_name, *relative_parts])
+
+    @staticmethod
+    def _find_project_root(package_directory: Path) -> Path:
+        for candidate in (package_directory, *package_directory.parents):
+            if (candidate / "hoomer.toml").is_file():
+                return candidate
+
+        # A package can still be run before a project manifest exists. It acts
+        # as a single-package project whose root is the package directory.
+        return package_directory
+
+    def _load_package_directory(
+        self,
+        package_directory: Path,
+        import_path: str,
+        location: SourceLocation,
+        *,
+        invoke_main: bool,
+    ) -> object:
+        if not package_directory.is_dir():
+            raise PackageContentError(
+                location,
+                "Hoomer executes packages as directories, not individual files.",
+                expected="a directory containing .hmr package files",
+                found=str(package_directory),
+            )
+
+        loaded_package = self._loaded_package_directories.get(package_directory)
+        if loaded_package is not None:
+            if loaded_package.import_path != import_path:
+                raise PackageContentError(
+                    location,
+                    "One package directory cannot have two import paths.",
+                    expected=loaded_package.import_path,
+                    found=import_path,
+                )
+            return self._invoke_main(loaded_package) if invoke_main else loaded_package
+
+        source_paths = sorted(package_directory.glob("*.hmr"))
+        if not source_paths:
+            raise PackageContentError(
+                location,
+                "This directory does not contain a Hoomer package.",
+                expected="at least one .hmr file",
+                found=str(package_directory),
+            )
+
+        programs = [self._parse_file(source_path) for source_path in source_paths]
+        self._validate_package_files(package_directory, programs)
+
+        if package_directory in self._package_directories_being_loaded:
+            raise RuntimeHoomerError(
+                location,
+                f"Importing package `{import_path}` creates a circular import.",
+                expected="packages whose imports do not loop back to a package still loading",
+                found=import_path,
+            )
+
+        existing_package = self.package_registry.get(import_path)
+        package_comes_from_another_directory = (
+            existing_package is not None
+            and existing_package.source_directory is not None
+            and existing_package.source_directory != package_directory
+        )
+        if package_comes_from_another_directory:
+            raise PackageContentError(
+                programs[0].package_location or location,
+                f"Import path `{import_path}` is already defined by another directory.",
+                expected=str(existing_package.source_directory),
+                found=str(package_directory),
+            )
+
+        self._package_directories_being_loaded.add(package_directory)
+        self._package_paths_being_loaded.add(import_path)
+        try:
+            runtime_package = self._install_package_programs(
+                programs,
+                import_path=import_path,
+                source_directory=package_directory,
+            )
+            self._loaded_package_directories[package_directory] = runtime_package
+        except Exception:
+            if existing_package is None:
+                self.package_registry.discard(import_path)
+            raise
+        finally:
+            self._package_directories_being_loaded.remove(package_directory)
+            self._package_paths_being_loaded.remove(import_path)
+
+        return self._invoke_main(runtime_package) if invoke_main else runtime_package
+
+    def _validate_package_files(
+        self,
+        package_directory: Path,
+        programs: list[ast.Program],
+    ) -> None:
+        first_program = programs[0]
+        if first_program.package_name is None:
+            raise PackageContentError(
+                SourceLocation(first_program.statements[0].location.file_name, 1, 1)
+                if first_program.statements
+                else SourceLocation(str(package_directory), 1, 1),
+                "Every .hmr file must begin with a package declaration.",
+                expected="`package PackageName` on the first meaningful line",
+                found="a file without a package declaration",
+            )
+
+        expected_name = first_program.package_name
+        for program in programs[1:]:
+            if program.package_name == expected_name:
+                continue
+            found_name = program.package_name or "no package declaration"
+            raise PackageContentError(
+                program.package_location
+                or SourceLocation(str(package_directory), 1, 1),
+                "Every .hmr file in a directory must declare the same package.",
+                expected="package " + expected_name,
+                found=found_name,
+            )
+
+        expected_directory_name = self._package_name_to_directory_name(expected_name)
+        if package_directory.name.casefold() != expected_directory_name.casefold():
+            raise PackageContentError(
+                first_program.package_location
+                or SourceLocation(str(package_directory), 1, 1),
+                "A package name must agree with its directory name.",
+                expected=expected_directory_name,
+                found=package_directory.name,
+            )
+
+    def _install_package_programs(
+        self,
+        programs: list[ast.Program],
+        *,
+        import_path: str,
+        source_directory: Path | None,
+    ) -> RuntimePackage:
+        package_name = programs[0].package_name
+        if package_name is None:
+            raise ValueError("Package programs must have a package declaration.")
+
+        self._validate_unique_package_declarations(programs)
+        runtime_package = self.package_registry.get_or_create(
+            package_name,
+            import_path,
+            source_directory=source_directory,
+        )
+        file_environments = [Environment(runtime_package.environment) for _ in programs]
+
+        for program, file_environment in zip(programs, file_environments, strict=True):
+            for statement in program.statements:
+                if isinstance(statement, ast.ImportStatement):
+                    self.execute_statement(statement, file_environment)
+
+        for program, file_environment in zip(programs, file_environments, strict=True):
+            for statement in program.statements:
+                if isinstance(statement, (ast.FunctionDefinition, ast.StructDefinition)):
+                    self.execute_statement(statement, file_environment, runtime_package)
+
+        for program, file_environment in zip(programs, file_environments, strict=True):
+            for statement in program.statements:
+                if self._is_constant_declaration(statement):
+                    self._define_package_constant(
+                        statement.expression,
+                        file_environment,
+                        runtime_package,
+                    )
+
+        return runtime_package
+
+    def _validate_unique_package_declarations(self, programs: list[ast.Program]) -> None:
+        declarations: dict[str, SourceLocation] = {}
+        for program in programs:
+            for statement in program.statements:
+                declaration_name = self._package_declaration_name(statement)
+                if declaration_name is None:
+                    continue
+                first_location = declarations.get(declaration_name)
+                if first_location is not None:
+                    raise PackageContentError(
+                        statement.location,
+                        f"Package declaration `{declaration_name}` is duplicated.",
+                        expected=(
+                            f"one declaration; the first is in {first_location.file_name} "
+                            f"at line {first_location.line}"
+                        ),
+                        found=f"another `{declaration_name}` declaration",
+                    )
+                declarations[declaration_name] = statement.location
+
+    @staticmethod
+    def _package_declaration_name(statement: ast.Statement) -> str | None:
+        if isinstance(statement, (ast.FunctionDefinition, ast.StructDefinition)):
+            return statement.name
+        if Interpreter._is_constant_declaration(statement):
+            return statement.expression.target.name
+        return None
+
+    @staticmethod
+    def _is_constant_declaration(statement: ast.Statement) -> bool:
+        if not isinstance(statement, ast.ExpressionStatement):
+            return False
+        expression = statement.expression
+        return (
+            isinstance(expression, ast.AssignmentExpression)
+            and isinstance(expression.target, ast.VariableExpression)
+            and expression.target.name.isupper()
+        )
+
+    def _define_package_constant(
+        self,
+        expression: ast.AssignmentExpression,
+        file_environment: Environment,
+        runtime_package: RuntimePackage,
+    ) -> object:
+        constant_name = expression.target.name
+        constant_value = self.evaluate_expression(expression.value, file_environment)
+        runtime_package.environment.define(
+            constant_name,
+            constant_value,
+            is_mutable=False,
+            location=expression.location,
+        )
+        runtime_package.make_public(constant_name)
+        return constant_value
+
+    def _invoke_main(self, runtime_package: RuntimePackage) -> object:
+        main_function = runtime_package.environment.get_local("main")
+        if main_function is None:
+            return runtime_package
+        if not isinstance(main_function, RuntimeFunction):
+            package_location = str(
+                runtime_package.source_directory or runtime_package.import_path
+            )
+            raise RuntimeHoomerError(
+                SourceLocation(package_location, 1, 1),
+                f"Package `{runtime_package.import_path}` has a non-function named `main`.",
+                expected="a parameterless `fn main ... end` declaration",
+                found=runtime_type_name(main_function),
+            )
+        if not main_function.accepts_arguments(0, set()):
+            raise RuntimeHoomerError(
+                main_function.definition.location,
+                "A package entry point must be callable without arguments.",
+                expected="`fn main` or `fn main()`",
+                found=main_function.signature,
+            )
+        return main_function.call(
+            self,
+            [],
+            {},
+            main_function.definition.location,
+        )
 
     def execute_function_body(
         self,
@@ -144,7 +450,8 @@ class Interpreter:
         self._loop_depth = 0
         try:
             try:
-                return self.execute_statements(statements, environment)
+                self.execute_statements(statements, environment)
+                return None
             except ReturnFromFunction as return_signal:
                 return return_signal.value
         finally:
@@ -155,32 +462,60 @@ class Interpreter:
         self,
         statements: list[ast.Statement],
         environment: Environment,
-        active_module: RuntimeModule | None = None,
+        active_package: RuntimePackage | None = None,
     ) -> object:
         last_value: object = None
         for statement in statements:
-            last_value = self.execute_statement(statement, environment, active_module)
+            last_value = self.execute_statement(statement, environment, active_package)
         return last_value
 
     def execute_statement(
         self,
         statement: ast.Statement,
         environment: Environment,
-        active_module: RuntimeModule | None = None,
+        active_package: RuntimePackage | None = None,
     ) -> object:
         if isinstance(statement, ast.ExpressionStatement):
-            expression_value = self.evaluate_expression(statement.expression, environment)
-            if active_module is not None:
-                assignment_expression = statement.expression
-                if isinstance(assignment_expression, ast.AssignmentExpression):
-                    assignment_target = assignment_expression.target
-                    if isinstance(assignment_target, ast.VariableExpression):
-                        # Constants are the one module declaration without a
-                        # separate ``pub`` form. Their UPPER_SNAKE_CASE name is
-                        # already explicit, so declaring one makes it available
-                        # as ``Module.CONSTANT_NAME`` automatically.
-                        active_module.make_public(assignment_target.name)
+            expression = statement.expression
+            if isinstance(expression, ast.CallExpression):
+                callable_value = self.evaluate_expression(
+                    expression.callable_expression,
+                    environment,
+                )
+                if self._is_fallible_callable(callable_value):
+                    raise RuntimeHoomerError(
+                        expression.location,
+                        f"The result of fallible function "
+                        f"`{callable_value.name}` is discarded.",
+                        expected=(
+                            "handle it with `when`, store or return it, "
+                            "or explicitly `ignore` it"
+                        ),
+                        found=f"an unused call to `{callable_value.name}`",
+                    )
+                expression_value = self._call_value(
+                    expression,
+                    environment,
+                    callable_value,
+                )
+            else:
+                expression_value = self.evaluate_expression(expression, environment)
             return expression_value
+
+        if isinstance(statement, ast.IgnoreStatement):
+            callable_value = self.evaluate_expression(
+                statement.expression.callable_expression,
+                environment,
+            )
+            if not self._is_fallible_callable(callable_value):
+                raise RuntimeHoomerError(
+                    statement.location,
+                    "`ignore` is reserved for deliberately discarded fallible results.",
+                    expected="a function ending in `!`",
+                    found=runtime_type_name(callable_value),
+                )
+            self._call_value(statement.expression, environment, callable_value)
+            return None
 
         if isinstance(statement, ast.PrintStatement):
             value = self.evaluate_expression(statement.expression, environment)
@@ -203,25 +538,19 @@ class Interpreter:
             raise ReturnFromFunction(return_value)
 
         if isinstance(statement, ast.FunctionDefinition):
-            return self._define_function(statement, environment, active_module)
+            return self._define_function(statement, environment, active_package)
 
         if isinstance(statement, ast.StructDefinition):
-            return self._define_struct(statement, environment, active_module)
-
-        if isinstance(statement, ast.ModuleDefinition):
-            return self._execute_module_definition(statement)
+            return self._define_struct(statement, environment, active_package)
 
         if isinstance(statement, ast.ImportStatement):
             return self._execute_import(statement, environment)
 
         if isinstance(statement, ast.IfStatement):
-            return self._execute_if(statement, environment, active_module)
-
-        if isinstance(statement, ast.WhenStatement):
-            return self._execute_when(statement, environment, active_module)
+            return self._execute_if(statement, environment, active_package)
 
         if isinstance(statement, ast.ForStatement):
-            return self._execute_for(statement, environment, active_module)
+            return self._execute_for(statement, environment, active_package)
 
         if isinstance(statement, ast.ContinueStatement):
             if self._loop_depth == 0:
@@ -245,7 +574,11 @@ class Interpreter:
     ) -> object:
         if isinstance(expression, ast.LiteralExpression):
             if isinstance(expression.value, str):
-                return self._interpolate_string(expression.value, expression.location, environment)
+                return self._interpolate_string(
+                    expression.value,
+                    expression.location,
+                    environment,
+                )
             return expression.value
 
         if isinstance(expression, ast.VariableExpression):
@@ -276,6 +609,15 @@ class Interpreter:
                 for item in expression.items
             ]
 
+        if isinstance(expression, ast.RangeExpression):
+            return self._evaluate_range(expression, environment)
+
+        if isinstance(expression, ast.WhenExpression):
+            return self._evaluate_when(expression, environment)
+
+        if isinstance(expression, ast.InlineWhenExpression):
+            return self._evaluate_inline_when(expression, environment)
+
         raise RuntimeHoomerError(
             expression.location,
             f"The interpreter does not know how to evaluate {type(expression).__name__}.",
@@ -285,50 +627,37 @@ class Interpreter:
         self,
         definition: ast.FunctionDefinition,
         environment: Environment,
-        active_module: RuntimeModule | None,
+        active_package: RuntimePackage | None,
     ) -> object:
-        runtime_function = RuntimeFunction(definition, environment)
-        existing_value = environment.get_local(definition.name)
-
-        if isinstance(existing_value, RuntimeFunction):
-            function_group = FunctionGroup(definition.name, existing_value)
-            function_group.add_overload(runtime_function, definition.location)
-            environment.define(
-                definition.name,
-                function_group,
-                replace=True,
-                location=definition.location,
-            )
-            stored_function: object = function_group
-        elif isinstance(existing_value, FunctionGroup):
-            existing_value.add_overload(runtime_function, definition.location)
-            stored_function = existing_value
-        elif existing_value is not None or environment.has_local(definition.name):
+        declaration_environment = (
+            active_package.environment if active_package is not None else environment
+        )
+        if declaration_environment.has_local(definition.name):
             raise RuntimeHoomerError(
                 definition.location,
-                f"`{definition.name}` already names a non-function value in this scope.",
+                f"Function `{definition.name}` is already defined in this scope.",
                 expected="a unique function name",
                 found=definition.name,
             )
-        else:
-            environment.define(
-                definition.name,
-                runtime_function,
-                location=definition.location,
-            )
-            stored_function = runtime_function
 
-        if active_module is not None:
-            active_module.register_member(definition.name)
+        runtime_function = RuntimeFunction(definition, environment)
+        declaration_environment.define(
+            definition.name,
+            runtime_function,
+            location=definition.location,
+        )
+
+        if active_package is not None:
+            active_package.register_member(definition.name)
             if definition.is_public:
-                active_module.make_public(definition.name)
-        return stored_function
+                active_package.make_public(definition.name)
+        return runtime_function
 
     def _define_struct(
         self,
         definition: ast.StructDefinition,
         environment: Environment,
-        active_module: RuntimeModule | None,
+        active_package: RuntimePackage | None,
     ) -> RuntimeStructDefinition:
         runtime_fields = [
             RuntimeFieldDefinition(field.name, field.default_value)
@@ -339,89 +668,50 @@ class Interpreter:
             runtime_fields,
             environment,
         )
-        environment.define(
+        declaration_environment = (
+            active_package.environment if active_package is not None else environment
+        )
+        declaration_environment.define(
             definition.name,
             runtime_struct,
             is_mutable=False,
             location=definition.location,
         )
-        if active_module is not None:
-            active_module.register_member(definition.name)
+        if active_package is not None:
+            active_package.register_member(definition.name)
             if definition.is_public:
-                active_module.make_public(definition.name)
+                active_package.make_public(definition.name)
         return runtime_struct
-
-    def _execute_module_definition(self, definition: ast.ModuleDefinition) -> RuntimeModule:
-        runtime_module = self.module_registry.get_or_create_path(definition.name_path)
-        self.execute_statements(
-            definition.body,
-            runtime_module.environment,
-            active_module=runtime_module,
-        )
-        return runtime_module
 
     def _execute_import(
         self,
         statement: ast.ImportStatement,
         environment: Environment,
     ) -> object:
-        self._load_import_if_needed(statement.name_path, statement.location)
+        source_package = self._load_import_if_needed(
+            statement.package_path,
+            statement.location,
+        )
 
         if statement.selected_names:
-            source_module = self.module_registry.get(statement.name_path)
-            if source_module is None:
-                raise RuntimeHoomerError(
-                    statement.location,
-                    f"`{'.'.join(statement.name_path)}` is not a loaded module.",
-                    expected="a module before `:` in a selected import",
-                    found=".".join(statement.name_path),
-                )
-
             for selected_name in statement.selected_names:
-                imported_value = source_module.get_member(selected_name, statement.location)
+                imported_value = source_package.get_member(selected_name, statement.location)
                 self._bind_imported_name(
                     environment,
                     selected_name,
                     imported_value,
                     statement.location,
                 )
-            return source_module
+            return source_package
 
-        # A dotted import has two useful interpretations. If the entire path is
-        # a module, ``import Accounts.User`` binds that nested module. Otherwise
-        # it binds public member ``User`` from module ``Accounts``. Trying the
-        # exact module first preserves both forms without adding new syntax.
-        exact_module = self.module_registry.get(statement.name_path)
-        if exact_module is not None:
-            local_name = statement.alias or statement.name_path[-1]
-            self._bind_imported_name(
-                environment,
-                local_name,
-                exact_module,
-                statement.location,
-            )
-            return exact_module
-
-        parent_path = statement.name_path[:-1]
-        member_name = statement.name_path[-1]
-        parent_module = self.module_registry.get(parent_path)
-        if parent_module is None:
-            raise RuntimeHoomerError(
-                statement.location,
-                f"Could not resolve import `{'.'.join(statement.name_path)}`.",
-                expected="a module or public member available on the module search path",
-                found=".".join(statement.name_path),
-            )
-
-        imported_value = parent_module.get_member(member_name, statement.location)
-        local_name = statement.alias or member_name
+        local_name = statement.alias or source_package.name
         self._bind_imported_name(
             environment,
             local_name,
-            imported_value,
+            source_package,
             statement.location,
         )
-        return imported_value
+        return source_package
 
     @staticmethod
     def _bind_imported_name(
@@ -430,14 +720,7 @@ class Interpreter:
         imported_value: object,
         location: SourceLocation,
     ) -> None:
-        """Bind an import, accepting a registry-created identical module binding.
-
-        Loading ``Application`` creates the root module in the global namespace
-        before the import statement finishes. The import should reuse that same
-        object, not report a duplicate name. A genuinely different existing
-        value still goes through ``Environment.define`` and receives its normal
-        collision diagnostic.
-        """
+        """Bind one imported name in the current file scope."""
 
         existing_value = environment.get_local(local_name)
         if environment.has_local(local_name) and existing_value is imported_value:
@@ -448,15 +731,22 @@ class Interpreter:
         self,
         statement: ast.IfStatement,
         environment: Environment,
-        active_module: RuntimeModule | None,
+        active_package: RuntimePackage | None,
     ) -> object:
         for branch in statement.branches:
             condition_value = self.evaluate_expression(branch.condition, environment)
-            if is_truthy(condition_value):
+            if not isinstance(condition_value, bool):
+                raise RuntimeHoomerError(
+                    branch.condition.location,
+                    "An `if` condition must produce a boolean.",
+                    expected="`true` or `false`",
+                    found=runtime_type_name(condition_value),
+                )
+            if condition_value:
                 return self.execute_statements(
                     branch.body,
                     Environment(environment),
-                    active_module,
+                    active_package,
                 )
 
         if statement.else_body is None:
@@ -464,47 +754,70 @@ class Interpreter:
         return self.execute_statements(
             statement.else_body,
             Environment(environment),
-            active_module,
+            active_package,
         )
 
-    def _execute_when(
+    def _evaluate_when(
         self,
-        statement: ast.WhenStatement,
+        expression: ast.WhenExpression,
         environment: Environment,
-        active_module: RuntimeModule | None,
     ) -> object:
-        matched_value = self.evaluate_expression(statement.matched_expression, environment)
+        matched_value = self.evaluate_expression(expression.matched_expression, environment)
 
-        for branch in statement.branches:
+        for branch in expression.branches:
             if not self._pattern_matches(branch.pattern, matched_value, environment):
                 continue
 
             branch_environment = Environment(environment)
-            if statement.binding_name is not None:
+            if branch.binding_name is not None:
                 branch_environment.define(
-                    statement.binding_name,
+                    branch.binding_name,
                     matched_value,
-                    location=statement.location,
+                    location=branch.pattern.location,
                 )
-            return self.execute_statements(branch.body, branch_environment, active_module)
+            return self.execute_statements(branch.body, branch_environment)
 
-        return None
+        raise RuntimeHoomerError(
+            expression.location,
+            "No branch matched this `when` value.",
+            expected="the required final `_` branch to match",
+            found=runtime_type_name(matched_value),
+        )
+
+    def _evaluate_inline_when(
+        self,
+        expression: ast.InlineWhenExpression,
+        environment: Environment,
+    ) -> object:
+        matched_value = self.evaluate_expression(
+            expression.matched_expression,
+            environment,
+        )
+        if self._pattern_matches(expression.pattern, matched_value, environment):
+            return matched_value
+
+        if expression.fallback_expression is None:
+            return None
+        return self.evaluate_expression(expression.fallback_expression, environment)
 
     def _execute_for(
         self,
         statement: ast.ForStatement,
         environment: Environment,
-        active_module: RuntimeModule | None,
+        active_package: RuntimePackage | None,
     ) -> object:
         iterable_value = self.evaluate_expression(
             statement.iterable_expression,
             environment,
         )
-        if not isinstance(iterable_value, list):
+        if not isinstance(iterable_value, (list, range)):
             raise RuntimeHoomerError(
                 statement.iterable_expression.location,
-                "A `for` loop currently iterates over a list.",
-                expected="a list such as `[first, second]`",
+                "A `for` loop iterates over a list or range.",
+                expected=(
+                    "a list such as `[first, second]` or "
+                    "a range such as `0..10`"
+                ),
                 found=runtime_type_name(iterable_value),
             )
 
@@ -522,7 +835,7 @@ class Interpreter:
                     last_value = self.execute_statements(
                         statement.body,
                         iteration_environment,
-                        active_module,
+                        active_package,
                     )
                 except ContinueLoop:
                     continue
@@ -570,11 +883,11 @@ class Interpreter:
     ) -> object:
         resolved_value = environment.get(name_path[0], location)
         for member_name in name_path[1:]:
-            if not isinstance(resolved_value, RuntimeModule):
+            if not isinstance(resolved_value, RuntimePackage):
                 resolved_prefix = ".".join(name_path[:-1])
                 raise RuntimeHoomerError(
                     location,
-                    f"`{resolved_prefix}` is not a module in this pattern.",
+                    f"`{resolved_prefix}` is not a package in this pattern.",
                     expected="a qualified struct name such as `Accounts.User`",
                     found=runtime_type_name(resolved_value),
                 )
@@ -596,6 +909,32 @@ class Interpreter:
             expected="a number after unary `-`",
             found=runtime_type_name(operand),
         )
+
+    def _evaluate_range(
+        self,
+        expression: ast.RangeExpression,
+        environment: Environment,
+    ) -> range:
+        first_value = self.evaluate_expression(expression.first_value, environment)
+        last_value = self.evaluate_expression(expression.last_value, environment)
+
+        first_is_integer = self._is_integer(first_value)
+        last_is_integer = self._is_integer(last_value)
+        bounds_are_integers = first_is_integer and last_is_integer
+        if not bounds_are_integers:
+            raise RuntimeHoomerError(
+                expression.location,
+                "A range must start and end with whole numbers.",
+                expected="two integers, such as `0..10`",
+                found=(
+                    f"{format_runtime_value(first_value, nested=True)} and "
+                    f"{format_runtime_value(last_value, nested=True)}"
+                ),
+            )
+
+        direction = 1 if first_value <= last_value else -1
+        inclusive_stop = last_value + direction
+        return range(first_value, inclusive_stop, direction)
 
     def _evaluate_binary(
         self,
@@ -685,6 +1024,14 @@ class Interpreter:
         environment: Environment,
     ) -> object:
         callable_value = self.evaluate_expression(expression.callable_expression, environment)
+        return self._call_value(expression, environment, callable_value)
+
+    def _call_value(
+        self,
+        expression: ast.CallExpression,
+        environment: Environment,
+        callable_value: object,
+    ) -> object:
         if (
             not expression.uses_parentheses
             and isinstance(callable_value, RuntimeStructDefinition)
@@ -737,6 +1084,13 @@ class Interpreter:
             expression.location,
         )
 
+    @staticmethod
+    def _is_fallible_callable(callable_value: object) -> bool:
+        return (
+            isinstance(callable_value, RuntimeFunction)
+            and callable_value.is_fallible
+        )
+
     def _read_field(
         self,
         target_value: object,
@@ -747,13 +1101,13 @@ class Interpreter:
             return target_value.get_field(field_name, location)
         if isinstance(target_value, ReflectionValue):
             return target_value.get_field(field_name, location)
-        if isinstance(target_value, RuntimeModule):
+        if isinstance(target_value, RuntimePackage):
             return target_value.get_member(field_name, location)
 
         raise RuntimeHoomerError(
             location,
             f"A value of type {runtime_type_name(target_value)} has no fields.",
-            expected="a struct instance, module, or reflection value",
+            expected="a struct instance, package, or reflection value",
             found=runtime_type_name(target_value),
         )
 
@@ -838,80 +1192,116 @@ class Interpreter:
 
     def _load_import_if_needed(
         self,
-        name_path: list[str],
+        import_path: str,
         location: SourceLocation,
-    ) -> None:
-        exact_module_exists = self.module_registry.get(name_path) is not None
-        parent_module_exists = (
-            len(name_path) > 1 and self.module_registry.get(name_path[:-1]) is not None
+    ) -> RuntimePackage:
+        if import_path in self._package_paths_being_loaded:
+            raise RuntimeHoomerError(
+                location,
+                f"Importing package `{import_path}` creates a circular import.",
+                expected="packages whose imports do not loop back to a package still loading",
+                found=import_path,
+            )
+
+        loaded_package = self.package_registry.get(import_path)
+        if loaded_package is not None:
+            return loaded_package
+
+        package_directory, searched_locations = self._resolve_import_directory(
+            import_path
         )
-        if exact_module_exists or parent_module_exists:
-            return
+        if package_directory is not None:
+            loaded_value = self._load_package_directory(
+                package_directory,
+                import_path,
+                location,
+                invoke_main=False,
+            )
+            if not isinstance(loaded_value, RuntimePackage):
+                raise RuntimeHoomerError(
+                    location,
+                    f"Import `{import_path}` did not load a package value.",
+                )
+            return loaded_value
 
-        relative_candidates = [Path(*name_path).with_suffix(".hmr")]
-        snake_case_path = [self._module_name_to_file_name(name) for name in name_path]
-        relative_candidates.append(Path(*snake_case_path).with_suffix(".hmr"))
-        if len(name_path) > 1:
-            relative_candidates.append(Path(*name_path[:-1]).with_suffix(".hmr"))
-            relative_candidates.append(Path(*snake_case_path[:-1]).with_suffix(".hmr"))
-        relative_candidates.append(Path(name_path[0]).with_suffix(".hmr"))
-        relative_candidates.append(Path(snake_case_path[0]).with_suffix(".hmr"))
+        expected_import = "a project package or installed package"
+        if self.project_root is not None:
+            local_candidate = self.project_root.joinpath(*import_path.split("/"))
+            if self._directory_contains_package(local_candidate):
+                expected_import = (
+                    f"`{self.project_root.name}/{import_path}` for the local package"
+                )
+        if searched_locations:
+            expected_import += ", or one of:\n    " + "\n    ".join(
+                searched_locations
+            )
 
-        # Preserve candidate order while removing duplicates. The most specific
-        # file wins: importing ``Accounts.User`` first tries
-        # ``Accounts/User.hmr``, then ``Accounts.hmr`` where User may be a member.
-        unique_candidates = list(dict.fromkeys(relative_candidates))
-        for search_path in self.module_search_paths:
-            for relative_candidate in unique_candidates:
-                source_path = (search_path / relative_candidate).resolve()
-                if not source_path.is_file():
-                    continue
-                self._execute_import_file(source_path, location)
-                return
-
-        searched_locations = [
-            str(search_path / candidate)
-            for search_path in self.module_search_paths
-            for candidate in unique_candidates
-        ]
         raise RuntimeHoomerError(
             location,
-            f"Could not find import `{'.'.join(name_path)}`.",
-            expected="a loaded module or one of:\n    " + "\n    ".join(searched_locations),
-            found="no matching .hmr file",
+            f"Could not find import `{import_path}`.",
+            expected=expected_import,
+            found="no matching package directory",
         )
 
+    def _resolve_import_directory(
+        self,
+        import_path: str,
+    ) -> tuple[Path | None, list[str]]:
+        path_parts = import_path.split("/")
+        project_root_name = (
+            self.project_root.name if self.project_root is not None else None
+        )
+        is_local_import = project_root_name == path_parts[0]
+
+        if is_local_import:
+            relative_parts = path_parts[1:]
+            package_directory = self.project_root.joinpath(*relative_parts)
+            searched_locations = [str(package_directory)]
+            if self._directory_contains_package(package_directory):
+                return package_directory.resolve(), searched_locations
+            return None, searched_locations
+
+        candidates: list[Path] = []
+        for search_path in self.package_search_paths:
+            search_path_is_inside_project = (
+                self.project_root is not None
+                and search_path.is_relative_to(self.project_root)
+            )
+            if search_path_is_inside_project:
+                # Local packages must include the project-root segment. A
+                # search path must not turn `accounts` into an implicit local
+                # import when the real identity is `kenekoi/accounts`.
+                continue
+            if search_path.name == path_parts[0]:
+                candidates.append(search_path.joinpath(*path_parts[1:]))
+            else:
+                candidates.append(search_path.joinpath(*path_parts))
+
+        resolved_candidates = [candidate.resolve() for candidate in candidates]
+        unique_candidates = list(dict.fromkeys(resolved_candidates))
+        for candidate in unique_candidates:
+            if self._directory_contains_package(candidate):
+                return candidate, [str(path) for path in unique_candidates]
+        return None, [str(path) for path in unique_candidates]
+
     @staticmethod
-    def _module_name_to_file_name(module_name: str) -> str:
-        """Map ``LoginService`` to the conventional ``login_service`` filename."""
+    def _directory_contains_package(directory: Path) -> bool:
+        return directory.is_dir() and any(directory.glob("*.hmr"))
+
+    @staticmethod
+    def _package_name_to_directory_name(package_name: str) -> str:
+        """Map ``LoginService`` to its conventional ``login_service`` directory."""
 
         words_separated_before_capitals = re.sub(
             r"(.)([A-Z][a-z]+)",
             r"\1_\2",
-            module_name,
+            package_name,
         )
         return re.sub(
             r"([a-z0-9])([A-Z])",
             r"\1_\2",
             words_separated_before_capitals,
         ).lower()
-
-    def _execute_import_file(self, source_path: Path, location: SourceLocation) -> None:
-        if source_path in self._loaded_files:
-            return
-        if source_path in self._files_being_loaded:
-            raise RuntimeHoomerError(
-                location,
-                f"Importing `{source_path}` creates a circular import.",
-                expected="modules whose imports do not loop back to a file still loading",
-                found=str(source_path),
-            )
-
-        self._files_being_loaded.add(source_path)
-        try:
-            self.execute_file(source_path)
-        finally:
-            self._files_being_loaded.remove(source_path)
 
     def _install_builtins(self) -> None:
         reflect_function = NativeFunction(
@@ -922,15 +1312,20 @@ class Interpreter:
         self.global_environment.define("reflect", reflect_function, is_mutable=False)
 
         text_environment = Environment(self.global_environment)
-        text_module = RuntimeModule("Text", text_environment, is_builtin=True)
+        text_package = RuntimePackage(
+            "Text",
+            "text",
+            text_environment,
+            is_builtin=True,
+        )
         text_functions = [
             NativeFunction("trim", self._native_trim, ["text"]),
             NativeFunction("lowercase", self._native_lowercase, ["text"]),
         ]
         for function in text_functions:
             text_environment.define(function.name, function, is_mutable=False)
-            text_module.make_public(function.name)
-        self.module_registry.register_builtin(text_module)
+            text_package.make_public(function.name)
+        self.package_registry.register_builtin(text_package)
 
     def _native_reflect(
         self,
@@ -1023,6 +1418,10 @@ class Interpreter:
         # Python's ``bool`` is a subclass of ``int``. Hoomer deliberately keeps
         # booleans and numbers separate, so ``true + 1`` must not become ``2``.
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @staticmethod
+    def _is_integer(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
 
     @staticmethod
     def _character_at(text: str, index: int) -> str | None:

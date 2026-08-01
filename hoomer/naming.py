@@ -12,12 +12,22 @@ SNAKE_CASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 CONSTANT_CASE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 
 
-def validate_module_name(name: str, location: SourceLocation) -> None:
+def validate_package_name(name: str, location: SourceLocation) -> None:
     _require_pattern(
         name,
         PASCAL_CASE_PATTERN,
         location,
-        "Module names use PascalCase, for example `Authentication` or `LoginService`.",
+        "Package names use PascalCase, for example `Authentication` or `LoginService`.",
+    )
+
+
+def validate_package_path_segment(name: str, location: SourceLocation) -> None:
+    _require_pattern(
+        name,
+        SNAKE_CASE_PATTERN,
+        location,
+        "Package import paths use snake_case segments, for example "
+        "`billing/accounts` or `kenekoi/login_service`.",
     )
 
 
@@ -31,13 +41,13 @@ def validate_struct_name(name: str, location: SourceLocation) -> None:
 
 
 def validate_function_name(name: str, location: SourceLocation) -> None:
-    name_without_marker = name[:-1] if name.endswith(("?", "!")) else name
+    name_without_marker = name[:-1] if name.endswith("!") else name
     _require_pattern(
         name_without_marker,
         SNAKE_CASE_PATTERN,
         location,
-        "Function names use snake_case, optionally followed by `?` or `!`; "
-        "for example `find_user`, `active?`, or `save_user!`.",
+        "Function names use snake_case, optionally followed by `!`; "
+        "for example `find_user` or `save_user!`.",
     )
 
 
@@ -79,4 +89,3 @@ def _require_pattern(
         expected="a name following the documented naming convention",
         found=name,
     )
-

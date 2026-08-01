@@ -13,6 +13,32 @@ def parse(source_code: str) -> ast.Program:
 
 
 class ParserTests(unittest.TestCase):
+    def test_import_uses_an_unquoted_connected_package_path(self) -> None:
+        program = Parser(
+            Lexer("import kenekoi/accounts as ProjectAccounts\n").scan_tokens()
+        ).parse()
+
+        import_statement = program.statements[0]
+        self.assertIsInstance(import_statement, ast.ImportStatement)
+        self.assertEqual(import_statement.package_path, "kenekoi/accounts")
+        self.assertEqual(import_statement.alias, "ProjectAccounts")
+
+    def test_import_rejects_strings_and_whitespace_around_slashes(self) -> None:
+        with self.assertRaises(ParserError) as quoted_error:
+            Parser(Lexer('import "kenekoi/accounts"\n').scan_tokens()).parse()
+
+        self.assertIn("package path", str(quoted_error.exception))
+
+        with self.assertRaises(ParserError) as spaced_error:
+            Parser(Lexer("import kenekoi / accounts\n").scan_tokens()).parse()
+
+        self.assertIn("cannot contain whitespace", str(spaced_error.exception))
+
+        with self.assertRaises(NamingHoomerError) as uppercase_error:
+            Parser(Lexer("import Kenekoi/accounts\n").scan_tokens()).parse()
+
+        self.assertIn("snake_case segments", str(uppercase_error.exception))
+
     def test_parser_honors_arithmetic_precedence(self) -> None:
         program = parse("result = 2 + 3 * 4\n")
 
@@ -24,6 +50,36 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(assignment.value.operator, "+")
         self.assertIsInstance(assignment.value.right_operand, ast.BinaryExpression)
         self.assertEqual(assignment.value.right_operand.operator, "*")
+
+    def test_parser_builds_an_inclusive_range_expression(self) -> None:
+        program = parse("numbers = 0..10\n")
+
+        assignment = program.statements[0].expression
+        self.assertIsInstance(assignment, ast.AssignmentExpression)
+        range_expression = assignment.value
+        self.assertIsInstance(range_expression, ast.RangeExpression)
+        self.assertEqual(range_expression.first_value.value, 0)
+        self.assertEqual(range_expression.last_value.value, 10)
+
+    def test_parser_builds_inline_when_with_optional_fallback(self) -> None:
+        program = parse(
+            "connection = connect!() when DatabaseConnection else nil\n"
+        )
+
+        assignment = program.statements[0].expression
+        self.assertIsInstance(assignment, ast.AssignmentExpression)
+        inline_when = assignment.value
+        self.assertIsInstance(inline_when, ast.InlineWhenExpression)
+        self.assertIsInstance(inline_when.matched_expression, ast.CallExpression)
+        self.assertIsInstance(inline_when.pattern, ast.StructPattern)
+        self.assertEqual(inline_when.pattern.name_path, ["DatabaseConnection"])
+        self.assertIsInstance(inline_when.fallback_expression, ast.LiteralExpression)
+        self.assertIsNone(inline_when.fallback_expression.value)
+
+        without_fallback = parse("connection = connect!() when DatabaseConnection\n")
+        inline_when = without_fallback.statements[0].expression.value
+        self.assertIsInstance(inline_when, ast.InlineWhenExpression)
+        self.assertIsNone(inline_when.fallback_expression)
 
 
     def test_parser_supports_multiline_named_struct_arguments(self) -> None:

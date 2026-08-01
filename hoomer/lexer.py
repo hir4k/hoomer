@@ -61,7 +61,6 @@ class Lexer:
             "[": TokenType.LEFT_BRACKET,
             "]": TokenType.RIGHT_BRACKET,
             ",": TokenType.COMMA,
-            ".": TokenType.DOT,
             ":": TokenType.COLON,
             "+": TokenType.PLUS,
             "-": TokenType.MINUS,
@@ -72,6 +71,16 @@ class Lexer:
         if current_character in single_character_tokens:
             self._add_token(
                 single_character_tokens[current_character],
+                token_start_index,
+                token_start_line,
+                token_start_column,
+            )
+            return
+
+        if current_character == ".":
+            token_type = TokenType.RANGE if self._match(".") else TokenType.DOT
+            self._add_token(
+                token_type,
                 token_start_index,
                 token_start_line,
                 token_start_column,
@@ -234,10 +243,10 @@ class Lexer:
         while self._peek().isalnum() or self._peek() == "_":
             self._advance()
 
-        # ``?`` and ``!`` communicate metadata only when they finish a name.
-        # For example, ``active?`` is one function name, while a standalone ``!``
-        # is rejected rather than silently becoming an operator Hoomer does not have.
-        if self._peek() in {"?", "!"}:
+        # ``!`` marks a function whose result deserves inspection. It remains
+        # part of the name, while ``?`` is deliberately not another spelling
+        # convention programmers have to learn.
+        if self._peek() == "!":
             self._advance()
 
         identifier_text = self.source_code[token_start_index : self.current_index]

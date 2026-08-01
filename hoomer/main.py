@@ -16,37 +16,57 @@ from hoomer.tokens import TokenType
 def build_argument_parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser(
         prog="hoomer",
-        description="Run programs written in the human-first Hoomer language.",
+        description="Run or check packages written in the human-first Hoomer language.",
     )
     commands = argument_parser.add_subparsers(dest="command", required=True)
 
-    run_command = commands.add_parser("run", help="run a .hmr source file")
-    run_command.add_argument("source_file", type=Path)
+    run_command = commands.add_parser("run", help="run a package directory")
+    run_command.add_argument("package_directory", type=Path)
+
+    check_command = commands.add_parser("check", help="check a package without running main")
+    check_command.add_argument("package_directory", type=Path)
 
     commands.add_parser("repl", help="start an interactive Hoomer session")
     return argument_parser
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
-    parsed_arguments = build_argument_parser().parse_args(arguments)
+    supplied_arguments = list(arguments) if arguments is not None else sys.argv[1:]
+    known_commands = {"run", "check", "repl"}
+    first_argument_is_package = (
+        supplied_arguments
+        and supplied_arguments[0] not in known_commands
+        and not supplied_arguments[0].startswith("-")
+    )
+    if first_argument_is_package:
+        supplied_arguments.insert(0, "run")
+
+    parsed_arguments = build_argument_parser().parse_args(supplied_arguments)
 
     if parsed_arguments.command == "repl":
         return run_repl()
 
-    source_file: Path = parsed_arguments.source_file
-    if source_file.suffix != ".hmr":
+    package_directory: Path = parsed_arguments.package_directory
+    if package_directory.is_file():
         print(
-            f"Hoomer source files use the .hmr extension, not {source_file.suffix or '(none)'!r}.",
+            "Cannot run an individual package file.\n\n"
+            f"{package_directory} belongs to the package directory:\n"
+            f"    {package_directory.parent}\n\n"
+            "Run:\n"
+            f"    hoomer {package_directory.parent}",
             file=sys.stderr,
         )
         return 2
-    if not source_file.is_file():
-        print(f"Hoomer source file not found: {source_file}", file=sys.stderr)
+    if not package_directory.is_dir():
+        print(f"Hoomer package directory not found: {package_directory}", file=sys.stderr)
         return 2
 
-    interpreter = Interpreter(module_search_paths=[source_file.parent])
+    interpreter = Interpreter()
     try:
-        interpreter.execute_file(source_file)
+        if parsed_arguments.command == "check":
+            interpreter.check_package(package_directory)
+        else:
+            interpreter.execute_package(package_directory)
     except (HoomerError, OSError) as error:
         print(error, file=sys.stderr)
         return 1
@@ -101,7 +121,6 @@ def _source_needs_more_lines(source_code: str) -> bool:
         return False
 
     block_opening_types = {
-        TokenType.MODULE,
         TokenType.STRUCT,
         TokenType.FUNCTION,
         TokenType.IF,

@@ -6,8 +6,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 from hoomer.errors import RuntimeHoomerError, SourceLocation
-from hoomer.runtime.functions import FunctionGroup, NativeFunction, RuntimeFunction
-from hoomer.runtime.modules import RuntimeModule
+from hoomer.runtime.functions import NativeFunction, RuntimeFunction
+from hoomer.runtime.packages import RuntimePackage
 from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 from hoomer.runtime.values import runtime_type_name
 
@@ -61,31 +61,31 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
             OrderedDict([("name", value.name), ("parameters", value.parameter_names)]),
         )
 
-    if isinstance(value, FunctionGroup):
-        parameter_lists = [overload.parameter_names for overload in value.overloads]
-        return ReflectionValue(
-            "FunctionInfo",
-            OrderedDict([("name", value.name), ("parameters", parameter_lists)]),
-        )
-
-    if isinstance(value, RuntimeModule):
-        module_values = [
+    if isinstance(value, RuntimePackage):
+        package_values = [
             (name, value.environment.get_local(name))
             for name in sorted(value.public_member_names)
         ]
         function_names = [
             name
-            for name, member in module_values
-            if isinstance(member, (RuntimeFunction, FunctionGroup, NativeFunction))
+            for name, member in package_values
+            if isinstance(member, (RuntimeFunction, NativeFunction))
         ]
         struct_names = [
             name
-            for name, member in module_values
+            for name, member in package_values
             if isinstance(member, RuntimeStructDefinition)
         ]
         return ReflectionValue(
-            "ModuleInfo",
-            OrderedDict([("functions", function_names), ("structs", struct_names)]),
+            "PackageInfo",
+            OrderedDict(
+                [
+                    ("name", value.name),
+                    ("path", value.import_path),
+                    ("functions", function_names),
+                    ("structs", struct_names),
+                ]
+            ),
         )
 
     return ReflectionValue(

@@ -1,6 +1,6 @@
 # Hoomer Language Design Philosophy
 
-**Version:** 0.1  
+**Version:** 0.2
 **Extension:** `.hmr`
 
 ## Try the interpreter
@@ -9,7 +9,7 @@ Hoomer requires Python 3.12 or newer. From this repository, run the complete
 accounts/application example with:
 
 ```sh
-python -m hoomer.main run examples/run_application.hmr
+python3 -m hoomer.main examples/application
 ```
 
 The output starts with:
@@ -23,23 +23,53 @@ Name: Hirak
 Install the local package to make the shorter command available:
 
 ```sh
-python -m pip install -e .
-hoomer run examples/run_application.hmr
+python3 -m pip install -e .
+hoomer examples/application
+hoomer check examples/application
 hoomer repl
 ```
 
 Run the test suite with:
 
 ```sh
-python -m unittest discover -v
+python3 -m unittest discover -v
 ```
 
 The MVP implements literals and interpolation, variables and constants,
-functions (including automatic return, defaults, named parameters, and
-overloads), structs, field
-access and assignment, modules, imports, `if`/`elsif`, `when` matching, function
-markers, lists, `for` loops, `continue`, reflection, `do` blocks, source-aware
+block and expression-bodied functions, default and named parameters, structs,
+field access and assignment, packages, imports, strict boolean `if`/`elsif`,
+exhaustive and inline `when` expressions, fallible-result markers, lists,
+inclusive ranges, `for` loops, `continue`, reflection, `do` blocks, source-aware
 errors, and an interactive REPL.
+
+## Example programs
+
+The `examples` directory includes standalone programs for familiar algorithms:
+
+- [`fizz_buzz`](examples/fizz_buzz) prints FizzBuzz from 1 through 100.
+- [`factorial`](examples/factorial) calculates factorials recursively.
+- [`fibonacci`](examples/fibonacci) prints the first 12 Fibonacci numbers.
+- [`prime_numbers`](examples/prime_numbers) finds prime numbers up to 50.
+- [`user`](examples/user) imports and uses a struct from another package.
+- [`inline_when`](examples/inline_when) demonstrates compact result
+  filtering with implicit `nil` and an optional lazy fallback.
+- [`checkout_showcase`](examples/checkout_showcase/README.md) implements the same
+  realistic checkout workflow in Ruby and Hoomer as a practical syntax comparison.
+- [`orm_dsl`](examples/orm_dsl/README.md) builds an executable Rails-inspired
+  model, transaction, persistence, and query DSL from ordinary Hoomer features.
+
+Run any of them from the repository root:
+
+```sh
+python3 -m hoomer.main examples/fizz_buzz
+python3 -m hoomer.main examples/factorial
+python3 -m hoomer.main examples/fibonacci
+python3 -m hoomer.main examples/prime_numbers
+python3 -m hoomer.main examples/user
+python3 -m hoomer.main examples/inline_when
+python3 -m hoomer.main examples/checkout_showcase/hoomer/checkout
+python3 -m hoomer.main examples/orm_dsl/application
+```
 
 ---
 
@@ -81,16 +111,17 @@ Code should communicate intent.
 Example:
 
 ```hmr
-user = find_user(email)
+user = find_user!(email)
 
-when user as account
-
-    User
+when user
+    User as account
         print account.name
 
     nil
         print "User not found"
 
+    _
+        print "Unexpected result"
 end
 ```
 
@@ -106,7 +137,7 @@ Hoomer should have a small number of concepts.
 
 The language provides:
 
-- Modules
+- Packages
 - Functions
 - Structs
 - Values
@@ -144,7 +175,7 @@ Control flow is explicit.
 
 Hoomer follows:
 
-> Modules organize behavior. Structs hold data. Functions transform data.
+> Packages organize behavior. Structs hold data. Functions transform data.
 
 There are no:
 
@@ -155,104 +186,88 @@ There are no:
 
 ---
 
-# 5. Modules
+# 5. Packages
 
-Modules are declarative namespaces: they describe what exists, but they do not
-perform application actions while loading.
-
-Example:
-
-```hmr
-module Authentication.LoginService
-```
-
-Modules contain:
-
-- Imports
-- Constants
-- Functions
-- Structs
-
-Functions and structs are private to their module unless their definition starts
-with `pub`. Module constants are available through their UPPER_SNAKE_CASE name.
-
-This is valid because every module-level statement is a declaration:
-
-Example:
-
-```hmr
-module Accounts
-
-MAX_LOGIN_ATTEMPTS = 5
-
-
-pub struct User
-
-    name,
-    email,
-    active=true,
-
-end
-
-
-pub fn create_user(name, email, active: = true)
-
-    User(
-        name=name,
-        email=email,
-        active=active,
-    )
-
-end
-
-end
-```
-
-A module cannot contain runtime statements. Assigning an ordinary variable,
-constructing a value for immediate use, printing, calling a function, or
-branching must happen inside a function.
-
-This is invalid:
-
-```hmr
-module Accounts
-
-user = User(name="Hirak")
-print user.name
-
-end
-```
-
-The interpreter reports:
+A package is a directory of `.hmr` files that share one semantic namespace.
+Every file starts with the same package header, which extends to EOF and does
+not need a closing `end`.
 
 ```text
-Hoomer Error:
-
-Runtime statement found at module level.
-
-Modules can only contain:
-    import
-    constant
-    struct
-    function
-
-Move this code inside a function.
+kenekoi/
+    hoomer.toml
+    accounts/
+        user.hmr
+        authentication.hmr
+    passwords/
+        password.hmr
 ```
-
-Runtime statements remain valid at the file's top level. There is no special
-entry-point function: `hoomer run` evaluates the file from top to bottom.
 
 ```hmr
-module Greeting
+# kenekoi/accounts/user.hmr
+package Accounts
 
-pub fn message()
-    "Hello"
+pub struct User
+    name,
+    email,
 end
 
+fn find_user(id)
 end
-
-print Greeting.message()
 ```
+
+```hmr
+# kenekoi/accounts/authentication.hmr
+package Accounts
+
+import kenekoi/passwords
+
+pub fn login(id, password)
+    user = find_user(id)
+    return Passwords.matches(user, password)
+end
+```
+
+Imports cross package boundaries, not file boundaries. Imports are file-scoped,
+so a sibling file must declare an external dependency when it uses that package
+directly. Private functions and structs are shared throughout their own package;
+`pub` exposes them to other packages.
+
+The directory containing `hoomer.toml` is the project root. Its snake_case
+directory name begins every project-local import path. In the example above,
+`kenekoi/accounts` and `kenekoi/passwords` are distinct runtime identities.
+Paths are unquoted because static imports are declarations, not runtime strings.
+An import whose first segment is not the project root is resolved as an external
+package from the interpreter's package search paths. The package manager will
+eventually populate those paths from the project's locked dependencies.
+
+Package loading is inert. Package scope accepts imports, inert constants,
+structs, and functions, but rejects printing, ordinary assignments, calls,
+branches, and loops. Constants cannot hide load-time calls:
+
+```hmr
+MAX_LOGIN_ATTEMPTS = 5       # valid
+DATABASE = Database.connect() # invalid
+```
+
+Running a package directory loads every `.hmr` file and invokes its private,
+zero-argument `main` function when present. A library package without `main`
+loads successfully without output.
+
+```hmr
+package Greeting
+
+fn main
+    print "Hello"
+end
+```
+
+```sh
+hoomer greeting
+hoomer check greeting
+```
+
+An individual package file is not executable because it may depend on sibling
+files. Use `hoomer greeting`, not `hoomer greeting/main.hmr`.
 
 ---
 
@@ -262,7 +277,7 @@ Naming is part of the language design.
 
 The shape of a name should tell the reader what it represents.
 
-## Modules
+## Packages
 
 PascalCase:
 
@@ -389,16 +404,11 @@ end
 Behavior:
 
 ```hmr
-module Users
+package Users
 
 fn activate(user)
-
-    user with {
-        active: true
-    }
-
-end
-
+    user.active = true
+    return user
 end
 ```
 
@@ -491,63 +501,63 @@ Example:
 save_user!
 ```
 
-The symbol is a communication tool.
+The symbol is a communication and tooling contract.
 
 It tells the reader:
 
-> This function may return an error value.
+> Inspect this function's ordinary return value before assuming success.
 
 Example:
 
 ```hmr
-user = save_user!(user)
+result = save_user!(user)
 ```
 
 The programmer can handle the result:
 
 ```hmr
-when user as result
+when result
+    User as user
+        print user.name
 
-    User
-        print result.name
+    DatabaseError as error
+        print error.message
 
-    DatabaseError
-        print result.message
-
+    _
+        print "Unexpected result"
 end
 ```
 
-The `!` is optional and does not change the function itself.
+Errors remain ordinary structs. Hoomer has no exception, throwing, or special
+failure channel. A fallible result may be matched immediately, stored, or
+returned. Discarding one must be explicit:
+
+```hmr
+ignore save_user!(user)
+```
 
 ---
 
-# 13. Predicate Functions
+# 13. Boolean Conditions
 
-Functions ending with `?` represent questions.
-
-They should return boolean values.
+Hoomer uses descriptive function names instead of a special `?` suffix.
 
 Example:
 
 ```hmr
-fn active?(user)
-
-    user.active
-
-end
+fn is_active(user) = user.active
 ```
 
 Usage:
 
 ```hmr
-if user.active?
-
+if is_active(user)
     print "Active"
-
 end
 ```
 
-The naming itself communicates intent.
+Conditions accept only `true` or `false`. Numbers, strings, lists, and `nil` are
+not implicitly truthy or falsey.
 
 ---
 
@@ -558,31 +568,57 @@ Pattern matching is done using `when`.
 Example:
 
 ```hmr
-when result as response
+when result
+    User as user
+        print user.name
 
-    User
-
-        print response.name
-
-
-    DatabaseError
-
-        print response.message
-
+    DatabaseError as error
+        print error.message
 
     nil
-
         print "Nothing found"
 
-
-    _
-
-        print "Unknown"
-
+    _ as unexpected
+        print "Unknown: {unexpected}"
 end
 ```
 
-The `as` keyword creates a local name.
+The `as` keyword creates a branch-local name. A final `_` branch is required so
+new outcomes cannot silently pass through unmatched.
+
+`when` is an expression. Its selected branch contributes its final value:
+
+```hmr
+database = when connect_database!()
+    DatabaseConnection as connection
+        connection
+    DatabaseConnectionFailure as error
+        print error.message
+        nil
+    _
+        nil
+end
+```
+
+This branch value does not return from a function. Only `return` exits a
+function or `do` block.
+
+When only one outcome matters, the inline form preserves a matching value and
+produces `nil` for every other outcome:
+
+```hmr
+connection = connect_database!() when DatabaseConnection
+```
+
+An optional `else` supplies a lazily evaluated fallback:
+
+```hmr
+customer = find_customer!() when Customer else GuestCustomer()
+```
+
+The expression before `when` runs exactly once. Inline `when` deliberately
+discards the original nonmatching value, so use the full form whenever an error
+needs to be logged, transformed, or returned.
 
 ---
 
@@ -599,15 +635,15 @@ User user
 Hoomer prefers:
 
 ```hmr
-when result as user
-
-    User
+when result
+    User as user
         print user.name
-
+    _
+        nil
 end
 ```
 
-The binding is controlled by the `when` expression.
+Each binding describes only the value matched by its own branch.
 
 ---
 
@@ -618,11 +654,7 @@ Functions are the main unit of behavior.
 Example:
 
 ```hmr
-fn greet(name)
-
-    "Hello {name}"
-
-end
+fn greet(name) = "Hello {name}"
 ```
 
 Parameters may be positional or named, and either form may have a default:
@@ -646,73 +678,108 @@ Ordinary calls may omit parentheses when the call stays unambiguous on one
 line—`greet "Hirak"` and `greet("Hirak")` are equivalent. Struct construction
 always requires parentheses.
 
-The last expression is returned automatically.
-
-Explicit return is available:
+A parameterless block function may omit its empty parameter list. This keeps
+declarative APIs, such as a migration library, focused on their domain:
 
 ```hmr
-fn validate(name)
-
-    if name == ""
-
-        return "Invalid"
-
-    end
-
-    "Valid"
-
+fn change
+    field "name", "string"
+    field "username", "string"
+    field "age", "int"
 end
 ```
 
+Here, `field` is an ordinary function supplied by the library. A migration
+runner invokes the definition with `change()`; empty parentheses remain
+required at the call site because `change` by itself refers to the function.
+
+Returning a value is always explicit:
+
+```hmr
+fn validate(name)
+    if name == ""
+        return "Invalid"
+    end
+
+    return "Valid"
+end
+```
+
+For a function that is only one expression, `=` makes the returned value
+explicit without a separate `return` or closing `end`:
+
+```hmr
+fn is_active(user) = user.active
+```
+
+Use the block form when a function needs multiple steps or control flow. A final
+expression in a block function is still discarded; only `return` exits that
+form with a value.
+
+An action-only function may reach `end`, which produces `nil`. If any path
+returns a value, every completion path must explicitly return a value.
+
 ---
 
-# 17. Function Overloading
+# 17. One Function per Name
 
-Functions can have multiple definitions when their accepted argument shapes do
-not overlap.
+A function name identifies exactly one definition in its scope. Hoomer does not
+perform overload selection.
 
 Example:
 
 ```hmr
-fn greet()
-
-    "Hello"
-
-end
-
-
-fn greet(name)
-
-    "Hello {name}"
-
+fn greet(name="World")
+    return "Hello {name}"
 end
 ```
 
-The language supports function selection based on arguments.
+Default and named parameters cover optional inputs. Genuinely different
+behavior should use a different descriptive name.
 
 ---
 
 # 18. Imports
 
-Imports bring names from another module into the current scope.
+Imports bring names from another package into the current scope.
 
-Example:
+Every import uses a connected, slash-separated `snake_case` package path:
 
 ```hmr
-import Accounts.User
+import kenekoi/accounts
 ```
 
-Import with custom name:
+The imported package's declaration supplies its local name, so this makes
+`Accounts` available. Use `as` when two paths declare the same package name or
+when a clearer local name helps:
 
 ```hmr
-import Accounts.Teacher as TeacherAccount
+import accounts as InstalledAccounts
+import kenekoi/accounts as ProjectAccounts
 ```
 
 Import selected members:
 
 ```hmr
-import Text:
+import kenekoi/accounts:
+    User,
+    find_user
+```
 
+Imports identify package directories, never source files. Quoted, relative,
+absolute, dotted, and whitespace-separated paths are invalid:
+
+```hmr
+import "kenekoi/accounts" # invalid: static paths are not strings
+import ../accounts        # invalid: paths are never relative
+import kenekoi / accounts # invalid: whitespace around `/`
+```
+
+Imports remain file-scoped. Same-package declarations need no import, while
+every file using an external package declares that dependency itself:
+
+```hmr
+import text:
     trim,
     lowercase
 ```
@@ -728,7 +795,7 @@ Blocks allow libraries to create readable APIs.
 Example:
 
 ```hmr
-Database.transaction do
+Database.transaction() do
 
     save_user(user)
 
@@ -750,8 +817,9 @@ Libraries build these.
 
 # 20. Lists and Loops
 
-List literals are comma-separated and may span lines. `for` visits each item;
-`continue` skips directly to the next one.
+List literals are comma-separated and may span lines. Inclusive integer ranges
+use `first..last`; they count up or down depending on the bounds. `for` visits
+each item, and `continue` skips directly to the next one.
 
 ```hmr
 users = [
@@ -768,6 +836,14 @@ for user in users
 end
 ```
 
+Use a range when the loop visits consecutive whole numbers:
+
+```hmr
+for number in 0..10
+    print number
+end
+```
+
 ---
 
 # 21. Reflection
@@ -778,7 +854,7 @@ Programs can inspect:
 
 - Values
 - Structs
-- Modules
+- Packages
 - Functions
 
 Example:
@@ -787,6 +863,16 @@ Example:
 info = reflect(user)
 
 print info.fields
+```
+
+Package reflection separates the declared name from its runtime import identity:
+
+```hmr
+import kenekoi/accounts
+
+info = reflect(Accounts)
+print info.name # Accounts
+print info.path # kenekoi/accounts
 ```
 
 Reflection enables:
@@ -871,7 +957,7 @@ The MVP will include:
 3. AST
 4. Interpreter
 5. Runtime values
-6. Modules
+6. Packages
 7. Structs
 8. Functions
 9. Pattern matching

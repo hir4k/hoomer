@@ -12,6 +12,60 @@ from tests.helpers import run_hoomer
 
 
 class ImprovedSyntaxTests(unittest.TestCase):
+    def test_expression_bodied_function_returns_its_expression(self) -> None:
+        source_code = """fn add(left, right) = left + right
+fn greeting(name="World") = "Hello {name}"
+
+print add(20, 22)
+print greeting()
+print greeting("Hirak")
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "42\nHello World\nHello Hirak\n")
+
+    def test_expression_bodied_function_is_an_explicit_return_in_the_ast(self) -> None:
+        program = Parser(
+            Lexer("fn answer() = 42\n", "expression_body.hmr").scan_tokens()
+        ).parse()
+
+        function = program.statements[0]
+        self.assertIsInstance(function, ast.FunctionDefinition)
+        self.assertEqual(len(function.body), 1)
+        self.assertIsInstance(function.body[0], ast.ReturnStatement)
+
+    def test_parameterless_block_function_may_omit_parentheses(self) -> None:
+        source_code = """fn field(name, field_type)
+    print "{name}: {field_type}"
+end
+
+fn change
+    field "name", "string"
+    field "username", "string"
+    field "age", "int"
+end
+
+change()
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "name: string\nusername: string\nage: int\n")
+
+    def test_public_expression_bodied_function_can_be_called_through_its_package(self) -> None:
+        interpreter, output = Interpreter.capture_output()
+        interpreter.execute_source(
+            """package Numbers
+
+pub fn doubled(number) = number * 2
+""",
+            "numbers.hmr",
+        )
+        interpreter.execute_source("import numbers\nprint Numbers.doubled(21)\n")
+
+        self.assertEqual(output.getvalue(), "42\n")
+
     def test_print_accepts_parenthesized_and_parenthesis_free_calls(self) -> None:
         _, output, _ = run_hoomer('print("Hello")\nprint "World"\n')
 
@@ -19,7 +73,7 @@ class ImprovedSyntaxTests(unittest.TestCase):
 
     def test_ordinary_calls_may_omit_parentheses_when_unambiguous(self) -> None:
         source_code = """fn greet(name, punctuation: = "!")
-    "Hello {name}{punctuation}"
+    return "Hello {name}{punctuation}"
 end
 
 message = greet "Hirak", punctuation="?"
@@ -85,7 +139,7 @@ User("Hirak")
     value:,
     punctuation: = "!",
 )
-    "{prefix}: {value}{punctuation}"
+    return "{prefix}: {value}{punctuation}"
 end
 
 print describe(value="ready")
@@ -162,23 +216,30 @@ end
         )
 
     def test_qualified_struct_and_literal_patterns_match(self) -> None:
-        source_code = """module Accounts
-    pub struct User
-        name,
-        city=nil,
-    end
+        interpreter, output = Interpreter.capture_output()
+        interpreter.execute_source(
+            """package Accounts
+
+pub struct User
+    name,
+    city=nil,
 end
+""",
+            "accounts.hmr",
+        )
+        interpreter.execute_source(
+            """import accounts
 
 user = Accounts.User(name="Hirak", city="Guwahati")
 
-when user as response
-    Accounts.User
+when user
+    Accounts.User as response
         print response.name
     _
         print "wrong type"
 end
 
-when user.city as city
+when user.city
     "Guwahati"
         print "local match"
     nil
@@ -187,10 +248,195 @@ when user.city as city
         print "elsewhere"
 end
 """
+        )
+
+        self.assertEqual(output.getvalue(), "Hirak\nlocal match\n")
+
+    def test_when_is_an_expression_with_branch_specific_bindings(self) -> None:
+        source_code = """struct DatabaseConnection
+    host,
+end
+
+struct DatabaseConnectionFailure
+    message,
+end
+
+result = DatabaseConnection(host="localhost")
+database = when result
+    DatabaseConnection as connection
+        connection
+    DatabaseConnectionFailure as error
+        print error.message
+        nil
+    _
+        nil
+end
+
+print database.host
+"""
 
         _, output, _ = run_hoomer(source_code)
 
-        self.assertEqual(output, "Hirak\nlocal match\n")
+        self.assertEqual(output, "localhost\n")
+
+    def test_when_requires_a_final_fallback_branch(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer("""when nil
+    nil
+        print "nil"
+end
+""")
+
+        self.assertIn("final `_` branch", str(caught_error.exception))
+
+    def test_inline_when_preserves_a_matching_struct_or_uses_nil(self) -> None:
+        source_code = """struct DatabaseConnection host end
+struct DatabaseConnectionError message end
+
+fn connect!(should_connect)
+    if should_connect
+        return DatabaseConnection(host="localhost")
+    else
+        return DatabaseConnectionError(message="offline")
+    end
+end
+
+connection = connect!(true) when DatabaseConnection
+missing_connection = connect!(false) when DatabaseConnection
+print connection.host
+print missing_connection
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "localhost\nnil\n")
+
+    def test_inline_when_filters_a_value_stored_in_a_variable(self) -> None:
+        source_code = """struct User name end
+struct UserError message end
+
+result = UserError(message="missing")
+user = result when User
+print user
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "nil\n")
+
+    def test_inline_when_uses_an_explicit_fallback_after_a_mismatch(self) -> None:
+        source_code = """struct Customer name end
+struct CustomerNotFound message end
+
+fn find_customer!()
+    return CustomerNotFound(message="missing")
+end
+
+customer = find_customer!() when Customer else Customer(name="Guest")
+print customer.name
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "Guest\n")
+
+    def test_inline_when_filters_a_parenthesis_free_call_result(self) -> None:
+        source_code = """struct User name end
+struct UserNotFound id end
+
+fn find_user!(id)
+    return UserNotFound(id=id)
+end
+
+user = find_user! 10 when User
+print user
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "nil\n")
+
+    def test_inline_when_evaluates_its_value_once_and_fallback_lazily(self) -> None:
+        source_code = """struct Probe calls=0 end
+struct User name end
+struct UserError message end
+
+fn find_user!(probe, found)
+    probe.calls = probe.calls + 1
+    if found
+        return User(name="Hirak")
+    else
+        return UserError(message="missing")
+    end
+end
+
+fn guest_user(probe)
+    probe.calls = probe.calls + 1
+    return User(name="Guest")
+end
+
+probe = Probe()
+found = find_user!(probe, true) when User else guest_user(probe)
+print found.name
+print probe.calls
+
+missing = find_user!(probe, false) when User else guest_user(probe)
+print missing.name
+print probe.calls
+"""
+
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "Hirak\n1\nGuest\n3\n")
+
+    def test_inline_when_reuses_qualified_and_literal_patterns(self) -> None:
+        interpreter, output = Interpreter.capture_output()
+        interpreter.execute_source(
+            "package Accounts\n\npub struct User name end\n",
+            "accounts.hmr",
+        )
+        interpreter.execute_source(
+            """import accounts
+
+user = Accounts.User(name="Hirak") when Accounts.User
+answer = 42 when 42 else 0
+wrong_answer = 41 when 42 else 0
+print user.name
+print answer
+print wrong_answer
+"""
+        )
+
+        self.assertEqual(output.getvalue(), "Hirak\n42\n0\n")
+
+    def test_inline_when_rejects_a_wildcard_pattern(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer("value = 42 when _\n")
+
+        self.assertIn("would always preserve", str(caught_error.exception))
+
+    def test_fallible_result_must_be_used_or_explicitly_ignored(self) -> None:
+        definition = """fn save_user!()
+    return nil
+end
+"""
+
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            run_hoomer(definition + "save_user!()\n")
+
+        self.assertIn("result of fallible function", str(caught_error.exception))
+
+        _, _, _ = run_hoomer(definition + "ignore save_user!()\n")
+
+    def test_ignore_rejects_an_ordinary_function(self) -> None:
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            run_hoomer("""fn save_user()
+end
+
+ignore save_user()
+""")
+
+        self.assertIn("reserved for deliberately discarded fallible", str(caught_error.exception))
 
     def test_lists_for_loops_and_continue_work_together(self) -> None:
         source_code = """struct User
@@ -216,26 +462,48 @@ end
 
         self.assertEqual(output, "Hirak\nRahul\n")
 
-    def test_private_module_member_requires_pub(self) -> None:
-        source_code = """module Accounts
-    fn internal_helper()
-        "hidden"
-    end
+    def test_for_loop_supports_inclusive_ascending_and_descending_ranges(self) -> None:
+        source_code = """for number in 0..3
+    print number
 end
 
-Accounts.internal_helper()
+for number in 2..0
+    print number
+end
 """
 
+        _, output, _ = run_hoomer(source_code)
+
+        self.assertEqual(output, "0\n1\n2\n3\n2\n1\n0\n")
+
+    def test_range_bounds_must_be_whole_numbers(self) -> None:
         with self.assertRaises(RuntimeHoomerError) as caught_error:
-            run_hoomer(source_code)
+            run_hoomer("""for number in 0..2.5
+    print number
+end
+""")
 
         rendered_error = str(caught_error.exception)
-        self.assertIn("private to module", rendered_error)
+        self.assertIn("whole numbers", rendered_error)
+        self.assertIn("two integers", rendered_error)
+
+    def test_private_package_member_requires_pub(self) -> None:
+        interpreter = Interpreter()
+        interpreter.execute_source(
+            "package Accounts\n\nfn internal_helper() = \"hidden\"\n",
+            "accounts.hmr",
+        )
+
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            interpreter.execute_source("import accounts\nAccounts.internal_helper()\n")
+
+        rendered_error = str(caught_error.exception)
+        self.assertIn("private to package", rendered_error)
         self.assertIn("Add `pub`", rendered_error)
 
     def test_complete_accounts_application_example(self) -> None:
         examples_directory = Path(__file__).parents[1] / "examples"
-        runner_path = examples_directory / "run_application.hmr"
+        application_directory = examples_directory / "application"
         expected_output = (
             "Welcome Hirak!\n"
             "ID: 10\n"
@@ -248,8 +516,8 @@ Accounts.internal_helper()
         )
 
         interpreter, output = Interpreter.capture_output(
-            module_search_paths=[examples_directory]
+            package_search_paths=[examples_directory]
         )
-        interpreter.execute_file(runner_path)
+        interpreter.execute_package(application_directory)
 
         self.assertEqual(output.getvalue(), expected_output)

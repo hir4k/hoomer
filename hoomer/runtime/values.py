@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hoomer.runtime.functions import FunctionGroup, NativeFunction, RuntimeBlock, RuntimeFunction
-    from hoomer.runtime.modules import RuntimeModule
+    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 def runtime_type_name(value: object) -> str:
     """Return a Hoomer-facing type name rather than a Python implementation name."""
 
-    from hoomer.runtime.functions import FunctionGroup, NativeFunction, RuntimeBlock, RuntimeFunction
-    from hoomer.runtime.modules import RuntimeModule
+    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 
@@ -31,21 +31,17 @@ def runtime_type_name(value: object) -> str:
         return value.definition.name
     if isinstance(value, RuntimeStructDefinition):
         return "struct"
-    if isinstance(value, RuntimeModule):
-        return "module"
-    if isinstance(value, (RuntimeFunction, FunctionGroup, NativeFunction, RuntimeBlock)):
+    if isinstance(value, RuntimePackage):
+        return "package"
+    if isinstance(value, (RuntimeFunction, NativeFunction, RuntimeBlock)):
         return "function"
     if isinstance(value, ReflectionValue):
         return value.kind
     if isinstance(value, list):
         return "list"
+    if isinstance(value, range):
+        return "range"
     return type(value).__name__
-
-
-def is_truthy(value: object) -> bool:
-    """Only ``false`` and ``nil`` are falsey, keeping conditions predictable."""
-
-    return value is not None and value is not False
 
 
 def format_runtime_value(value: object, *, nested: bool = False) -> str:
@@ -56,8 +52,8 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
     ``User(name: "Hirak")`` is easier to read than ``User(name: Hirak)``.
     """
 
-    from hoomer.runtime.functions import FunctionGroup, NativeFunction, RuntimeBlock, RuntimeFunction
-    from hoomer.runtime.modules import RuntimeModule
+    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 
@@ -78,6 +74,9 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
             format_runtime_value(item, nested=True) for item in value
         )
         return f"[{rendered_items}]"
+    if isinstance(value, range):
+        last_value = value.stop - value.step
+        return f"{value.start}..{last_value}"
     if isinstance(value, RuntimeStructInstance):
         rendered_fields = ", ".join(
             f"{name}: {format_runtime_value(field_value, nested=True)}"
@@ -86,17 +85,16 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
         return f"{value.definition.name}({rendered_fields})"
     if isinstance(value, RuntimeStructDefinition):
         return f"struct {value.name}"
-    if isinstance(value, RuntimeModule):
-        return f"module {value.full_name}"
+    if isinstance(value, RuntimePackage):
+        return f"package {value.name} ({value.import_path})"
     if isinstance(value, ReflectionValue):
         rendered_fields = ", ".join(
             f"{name}: {format_runtime_value(field_value, nested=True)}"
             for name, field_value in value.fields.items()
         )
         return f"{value.kind}({rendered_fields})"
-    if isinstance(value, (RuntimeFunction, FunctionGroup, NativeFunction)):
+    if isinstance(value, (RuntimeFunction, NativeFunction)):
         return f"fn {value.name}"
     if isinstance(value, RuntimeBlock):
         return "do block"
     return str(value)
-
