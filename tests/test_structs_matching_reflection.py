@@ -89,4 +89,4 @@ print function_info.parameters
 """
         )
 
-        self.assertEqual(output, "User\n['name', 'age']\ngreet\n['user']\n")
+        self.assertEqual(output, 'User\n["name", "age"]\ngreet\n["user"]\n')

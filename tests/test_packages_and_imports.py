@@ -294,7 +294,7 @@ print package_info.structs
 
         self.assertEqual(
             output.getvalue(),
-            "Accounts\naccounts\n['find_user']\n['User']\n",
+            'Accounts\naccounts\n["find_user"]\n["User"]\n',
         )
 
     def test_package_accepts_inert_constants(self) -> None:

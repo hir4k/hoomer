@@ -50,7 +50,7 @@ class BinaryExpression(Expression):
 
 @dataclass(slots=True)
 class AssignmentExpression(Expression):
-    target: VariableExpression | FieldAccessExpression
+    target: VariableExpression | FieldAccessExpression | IndexAccessExpression
     value: Expression
 
 
@@ -74,6 +74,12 @@ class FieldAccessExpression(Expression):
 
 
 @dataclass(slots=True)
+class IndexAccessExpression(Expression):
+    target: Expression
+    index: Expression
+
+
+@dataclass(slots=True)
 class BlockExpression(Expression):
     """A ``do ... end`` body represented as a callable runtime value."""
 
@@ -83,6 +89,17 @@ class BlockExpression(Expression):
 @dataclass(slots=True)
 class ListExpression(Expression):
     items: list[Expression]
+
+
+@dataclass(slots=True)
+class MapEntry:
+    key: Expression
+    value: Expression
+
+
+@dataclass(slots=True)
+class MapExpression(Expression):
+    entries: list[MapEntry]
 
 
 @dataclass(slots=True)
@@ -175,7 +192,7 @@ class IfStatement(Statement):
 
 @dataclass(slots=True)
 class ForStatement(Statement):
-    item_name: str
+    item_names: list[str]
     iterable_expression: Expression
     body: list[Statement]
 

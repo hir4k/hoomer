@@ -38,7 +38,7 @@ python3 -m unittest discover -v
 The MVP implements literals and interpolation, variables and constants,
 block functions, default and named parameters, structs,
 field access and assignment, packages, imports, strict boolean `if`/`elsif`,
-exhaustive and inline `when` expressions, fallible-result markers, lists,
+exhaustive and inline `when` expressions, fallible-result markers, lists, maps,
 inclusive ranges, `for` loops, `continue`, reflection, `do` blocks, source-aware
 errors, and an interactive REPL.
 
@@ -558,8 +558,8 @@ if is_active(user)
 end
 ```
 
-Conditions accept only `true` or `false`. Numbers, strings, lists, and `nil` are
-not implicitly truthy or falsey.
+Conditions accept only `true` or `false`. Numbers, strings, lists, maps, and
+`nil` are not implicitly truthy or falsey.
 
 ---
 
@@ -818,7 +818,7 @@ Libraries build these.
 
 ---
 
-# 20. Lists and Loops
+# 20. Collections and Loops
 
 List literals are comma-separated and may span lines. Inclusive integer ranges
 use `first..last`; they count up or down depending on the bounds. `for` visits
@@ -844,6 +844,49 @@ Use a range when the loop visits consecutive whole numbers:
 ```hmr
 for number in 0..10
     print number
+end
+```
+
+Maps associate stable scalar keys with arbitrary values. They preserve insertion
+order for printing and iteration, while equality compares their contents rather
+than their order.
+
+```hmr
+field_name = "email"
+user = {
+    "name": "Hirak",
+    field_name: "hirak@example.com",
+}
+
+print user["name"]
+print user["city"] # nil
+
+user["city"] = "Guwahati"
+```
+
+A quoted key is a string. An unquoted key such as `field_name` evaluates that
+variable. Map keys may be strings, numbers, booleans, or `nil`; mutable structs
+and collections cannot be keys because changing one must never make an existing
+entry unreachable.
+
+`in` checks whether a map contains a key, including a key whose stored value is
+`nil`:
+
+```hmr
+if "city" in user
+    print "A city was provided"
+end
+```
+
+A map loop can visit keys alone or bind each key and value:
+
+```hmr
+for key in user
+    print key
+end
+
+for key, value in user
+    print "{key}: {value}"
 end
 ```
 

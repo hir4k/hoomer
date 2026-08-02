@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
@@ -15,6 +16,7 @@ def runtime_type_name(value: object) -> str:
     """Return a Hoomer-facing type name rather than a Python implementation name."""
 
     from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
@@ -39,6 +41,8 @@ def runtime_type_name(value: object) -> str:
         return value.kind
     if isinstance(value, list):
         return "list"
+    if isinstance(value, RuntimeMap):
+        return "map"
     if isinstance(value, range):
         return "range"
     return type(value).__name__
@@ -53,6 +57,7 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
     """
 
     from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
@@ -64,7 +69,7 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
     if value is False:
         return "false"
     if isinstance(value, str):
-        return repr(value) if nested else value
+        return _quote_string(value) if nested else value
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     if isinstance(value, (int, float)):
@@ -74,6 +79,13 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
             format_runtime_value(item, nested=True) for item in value
         )
         return f"[{rendered_items}]"
+    if isinstance(value, RuntimeMap):
+        rendered_entries = ", ".join(
+            f"{format_runtime_value(key, nested=True)}: "
+            f"{format_runtime_value(entry_value, nested=True)}"
+            for key, entry_value in value.items()
+        )
+        return "{" + rendered_entries + "}"
     if isinstance(value, range):
         last_value = value.stop - value.step
         return f"{value.start}..{last_value}"
@@ -98,3 +110,14 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
     if isinstance(value, RuntimeBlock):
         return "do block"
     return str(value)
+
+
+def _quote_string(value: str) -> str:
+    """Render a nested string using Hoomer's supported escape sequences."""
+
+    escaped_value = value.replace("\\", "\\\\")
+    escaped_value = escaped_value.replace('"', '\\"')
+    escaped_value = escaped_value.replace("\n", "\\n")
+    escaped_value = escaped_value.replace("\r", "\\r")
+    escaped_value = escaped_value.replace("\t", "\\t")
+    return f'"{escaped_value}"'

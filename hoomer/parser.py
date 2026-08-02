@@ -397,7 +397,7 @@ class Parser:
                 raise PackageContentError(
                     constant_expression.value.location,
                     "Package constants cannot execute code while their package loads.",
-                    expected="an inert literal, list, range, or arithmetic expression",
+                    expected="an inert literal, list, map, range, or arithmetic expression",
                     found="a value that reads a name or calls a function",
                 )
 
@@ -460,6 +460,12 @@ class Parser:
             )
         if isinstance(expression, ast.ListExpression):
             return all(cls._is_inert_constant_value(item) for item in expression.items)
+        if isinstance(expression, ast.MapExpression):
+            return all(
+                cls._is_inert_constant_value(entry.key)
+                and cls._is_inert_constant_value(entry.value)
+                for entry in expression.entries
+            )
         if isinstance(expression, ast.RangeExpression):
             return (
                 cls._is_inert_constant_value(expression.first_value)
@@ -609,15 +615,36 @@ class Parser:
         return ast.IfStatement(if_token.location, branches, else_body)
 
     def _parse_for_statement(self, for_token: Token) -> ast.ForStatement:
-        item_token = self._consume(
+        first_item_token = self._consume(
             TokenType.IDENTIFIER,
             "A `for` loop needs a variable for its current item.",
             "a snake_case variable name",
         )
-        validate_variable_name(item_token.lexeme, item_token.location)
+        validate_variable_name(first_item_token.lexeme, first_item_token.location)
+        item_tokens = [first_item_token]
+
+        if self._match(TokenType.COMMA):
+            second_item_token = self._consume(
+                TokenType.IDENTIFIER,
+                "A map loop needs a variable for the current value after `,`.",
+                "a snake_case variable name",
+            )
+            validate_variable_name(
+                second_item_token.lexeme,
+                second_item_token.location,
+            )
+            if second_item_token.lexeme == first_item_token.lexeme:
+                raise ParserError(
+                    second_item_token.location,
+                    "A map loop must use different names for its key and value.",
+                    expected="two distinct variable names",
+                    found=second_item_token.lexeme,
+                )
+            item_tokens.append(second_item_token)
+
         self._consume(
             TokenType.IN,
-            "The loop variable must be followed by `in`.",
+            "The loop variable or key-value pair must be followed by `in`.",
             "`in`",
         )
         iterable_expression = self._parse_expression()
@@ -626,7 +653,7 @@ class Parser:
         self._consume(TokenType.END, "This `for` loop is missing its closing `end`.", "`end`")
         return ast.ForStatement(
             for_token.location,
-            item_token.lexeme,
+            [item_token.lexeme for item_token in item_tokens],
             iterable_expression,
             body,
         )
@@ -871,13 +898,18 @@ class Parser:
         assigned_value = self._parse_assignment()
         is_valid_target = isinstance(
             assignment_target,
-            (ast.VariableExpression, ast.FieldAccessExpression),
+            (
+                ast.VariableExpression,
+                ast.FieldAccessExpression,
+                ast.IndexAccessExpression,
+            ),
         )
         if not is_valid_target:
             raise ParserError(
                 assignment_operator.location,
-                "Only a variable or struct field can appear to the left of `=`.",
-                expected="a target such as `name` or `user.name`",
+                "Only a variable, struct field, or map entry can appear "
+                "to the left of `=`.",
+                expected="a target such as `name`, `user.name`, or `values[key]`",
                 found="a computed expression",
             )
 
@@ -1030,13 +1062,14 @@ class Parser:
             TokenType.IDENTIFIER,
             TokenType.LEFT_PARENTHESIS,
             TokenType.LEFT_BRACKET,
+            TokenType.LEFT_BRACE,
             TokenType.MINUS,
             TokenType.WHEN,
         }
 
     def _parse_equality(self) -> ast.Expression:
         expression = self._parse_comparison()
-        while self._match(TokenType.EQUAL, TokenType.NOT_EQUAL):
+        while self._match(TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN):
             operator = self._previous()
             right_operand = self._parse_comparison()
             expression = ast.BinaryExpression(
@@ -1119,6 +1152,21 @@ class Parser:
                 )
                 continue
 
+            if self._match(TokenType.LEFT_BRACKET):
+                opening_bracket = self._previous()
+                index_expression = self._parse_expression()
+                self._consume(
+                    TokenType.RIGHT_BRACKET,
+                    "This map access is missing its closing bracket.",
+                    "`]`",
+                )
+                expression = ast.IndexAccessExpression(
+                    opening_bracket.location,
+                    expression,
+                    index_expression,
+                )
+                continue
+
             break
 
         return expression
@@ -1190,6 +1238,8 @@ class Parser:
             return ast.VariableExpression(identifier_token.location, identifier_token.lexeme)
         if self._match(TokenType.LEFT_BRACKET):
             return self._parse_list_expression(self._previous())
+        if self._match(TokenType.LEFT_BRACE):
+            return self._parse_map_expression(self._previous())
         if self._match(TokenType.LEFT_PARENTHESIS):
             opening_parenthesis = self._previous()
             expression = self._parse_expression()
@@ -1227,6 +1277,34 @@ class Parser:
             "`]`",
         )
         return ast.ListExpression(opening_bracket.location, items)
+
+    def _parse_map_expression(self, opening_brace: Token) -> ast.MapExpression:
+        entries: list[ast.MapEntry] = []
+        self._skip_newlines()
+
+        while not self._check(TokenType.RIGHT_BRACE):
+            key = self._parse_expression()
+            self._consume(
+                TokenType.COLON,
+                "Every map key must be followed by `:` and its value.",
+                "`: value`",
+            )
+            value = self._parse_expression()
+            entries.append(ast.MapEntry(key, value))
+            self._skip_newlines()
+
+            if not self._match(TokenType.COMMA):
+                break
+            self._skip_newlines()
+            if self._check(TokenType.RIGHT_BRACE):
+                break
+
+        self._consume(
+            TokenType.RIGHT_BRACE,
+            "This map is missing its closing brace.",
+            "`}`",
+        )
+        return ast.MapExpression(opening_brace.location, entries)
 
     def _validate_unique_function_names(
         self,
@@ -1289,8 +1367,13 @@ class Parser:
             child_expressions.extend(argument.value for argument in expression.arguments)
         elif isinstance(expression, ast.FieldAccessExpression):
             child_expressions = [expression.target]
+        elif isinstance(expression, ast.IndexAccessExpression):
+            child_expressions = [expression.target, expression.index]
         elif isinstance(expression, ast.ListExpression):
             child_expressions = expression.items
+        elif isinstance(expression, ast.MapExpression):
+            for entry in expression.entries:
+                child_expressions.extend([entry.key, entry.value])
         elif isinstance(expression, ast.RangeExpression):
             child_expressions = [expression.first_value, expression.last_value]
 

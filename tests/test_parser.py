@@ -61,6 +61,24 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(range_expression.first_value.value, 0)
         self.assertEqual(range_expression.last_value.value, 10)
 
+    def test_parser_builds_map_literal_lookup_and_assignment(self) -> None:
+        program = parse(
+            '''values = {"name": "Hirak"}
+name = values["name"]
+values["age"] = 26
+'''
+        )
+
+        map_assignment = program.statements[0].expression
+        self.assertIsInstance(map_assignment.value, ast.MapExpression)
+        self.assertEqual(len(map_assignment.value.entries), 1)
+
+        lookup_assignment = program.statements[1].expression
+        self.assertIsInstance(lookup_assignment.value, ast.IndexAccessExpression)
+
+        entry_assignment = program.statements[2].expression
+        self.assertIsInstance(entry_assignment.target, ast.IndexAccessExpression)
+
     def test_parser_builds_inline_when_with_required_fallback(self) -> None:
         program = parse(
             "connection = connect!() when DatabaseConnection else nil\n"

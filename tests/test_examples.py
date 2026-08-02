@@ -76,9 +76,9 @@ class ExampleProgramTests(unittest.TestCase):
             output.getvalue(),
             "------------------------------------------\n"
             "Customer: Hirak <hirak@example.com>\n"
-            "Reflected struct: Product ['name', 'price_cents', 'available']\n"
+            'Reflected struct: Product ["name", "price_cents", "available"]\n'
             "Reflected function: checkout! "
-            "['customer', 'items', 'coupon_code', 'payment_limit_cents']\n"
+            '["customer", "items", "coupon_code", "payment_limit_cents"]\n'
             "Audit started: three checkout attempts\n"
             "Approved for Hirak (gold)\n"
             "Subtotal: 3400 cents\n"
@@ -107,7 +107,7 @@ class ExampleProgramTests(unittest.TestCase):
         self.assertEqual(
             output.getvalue(),
             "Model User maps to users\n"
-            "Fields: ['name', 'email', 'active']\n"
+            'Fields: ["name", "email", "active"]\n'
             "BEGIN\n"
             "Inserted User into users\n"
             "Created: Hirak\n"

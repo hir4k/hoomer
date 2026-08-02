@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Recognize braces used by insertion-ordered map literals and `in` membership.
+
 ## 0.2.0
 
 - Highlight file-scoped `package` declarations without treating them as

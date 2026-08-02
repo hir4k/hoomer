@@ -21,6 +21,7 @@ from hoomer.runtime.functions import (
     RuntimeBlock,
     RuntimeFunction,
 )
+from hoomer.runtime.maps import RuntimeMap
 from hoomer.runtime.packages import PackageRegistry, RuntimePackage
 from hoomer.runtime.reflection import ReflectionValue, reflect_runtime_value
 from hoomer.runtime.structs import (
@@ -628,6 +629,11 @@ class Interpreter:
             target_value = self.evaluate_expression(expression.target, environment)
             return self._read_field(target_value, expression.field_name, expression.location)
 
+        if isinstance(expression, ast.IndexAccessExpression):
+            target_value = self.evaluate_expression(expression.target, environment)
+            index_value = self.evaluate_expression(expression.index, environment)
+            return self._read_index(target_value, index_value, expression.location)
+
         if isinstance(expression, ast.BlockExpression):
             return RuntimeBlock(expression, environment)
 
@@ -636,6 +642,14 @@ class Interpreter:
                 self.evaluate_expression(item, environment)
                 for item in expression.items
             ]
+
+        if isinstance(expression, ast.MapExpression):
+            runtime_map = RuntimeMap()
+            for entry in expression.entries:
+                key = self.evaluate_expression(entry.key, environment)
+                value = self.evaluate_expression(entry.value, environment)
+                runtime_map.set(key, value, entry.key.location)
+            return runtime_map
 
         if isinstance(expression, ast.RangeExpression):
             return self._evaluate_range(expression, environment)
@@ -846,27 +860,56 @@ class Interpreter:
             statement.iterable_expression,
             environment,
         )
-        if not isinstance(iterable_value, (list, range)):
+        if not isinstance(iterable_value, (list, range, RuntimeMap)):
             raise RuntimeHoomerError(
                 statement.iterable_expression.location,
-                "A `for` loop iterates over a list or range.",
+                "A `for` loop iterates over a list, range, or map.",
                 expected=(
                     "a list such as `[first, second]` or "
-                    "a range such as `0..10`"
+                    "a range such as `0..10`, or a map such as "
+                    '`{"name": user}`'
                 ),
                 found=runtime_type_name(iterable_value),
             )
 
+        binds_key_and_value = len(statement.item_names) == 2
+        if binds_key_and_value and not isinstance(iterable_value, RuntimeMap):
+            raise RuntimeHoomerError(
+                statement.location,
+                "Only a map loop can bind both a key and value.",
+                expected="`for item in values` for a list or range",
+                found="two loop variables",
+            )
+
+        if isinstance(iterable_value, RuntimeMap):
+            iteration_values = (
+                iterable_value.items()
+                if binds_key_and_value
+                else iterable_value.keys()
+            )
+        else:
+            iteration_values = iterable_value
+
         last_value: object = None
         self._loop_depth += 1
         try:
-            for item_value in iterable_value:
+            for iteration_value in iteration_values:
                 iteration_environment = Environment(environment)
-                iteration_environment.define(
-                    statement.item_name,
-                    item_value,
-                    location=statement.location,
+                values_to_bind = (
+                    iteration_value
+                    if binds_key_and_value
+                    else (iteration_value,)
                 )
+                for item_name, item_value in zip(
+                    statement.item_names,
+                    values_to_bind,
+                    strict=True,
+                ):
+                    iteration_environment.define(
+                        item_name,
+                        item_value,
+                        location=statement.location,
+                    )
                 try:
                     last_value = self.execute_statements(
                         statement.body,
@@ -981,6 +1024,16 @@ class Interpreter:
         right_value = self.evaluate_expression(expression.right_operand, environment)
         operator = expression.operator
 
+        if operator == "in":
+            if isinstance(right_value, RuntimeMap):
+                return right_value.contains(left_value, expression.location)
+            raise RuntimeHoomerError(
+                expression.location,
+                "The right side of `in` must be a map.",
+                expected='a map such as `{"name": user}`',
+                found=runtime_type_name(right_value),
+            )
+
         if operator == "==":
             return left_value == right_value
         if operator == "!=":
@@ -1037,6 +1090,29 @@ class Interpreter:
                 expression.target.name,
                 assigned_value,
                 expression.target.location,
+            )
+
+        if isinstance(expression.target, ast.IndexAccessExpression):
+            target_value = self.evaluate_expression(
+                expression.target.target,
+                environment,
+            )
+            index_value = self.evaluate_expression(
+                expression.target.index,
+                environment,
+            )
+            if isinstance(target_value, RuntimeMap):
+                return target_value.set(
+                    index_value,
+                    assigned_value,
+                    expression.target.location,
+                )
+            raise RuntimeHoomerError(
+                expression.target.location,
+                f"A value of type {runtime_type_name(target_value)} "
+                "does not support indexed assignment.",
+                expected="a map entry such as `values[key] = value`",
+                found=runtime_type_name(target_value),
             )
 
         target_value = self.evaluate_expression(expression.target.target, environment)
@@ -1144,6 +1220,23 @@ class Interpreter:
             location,
             f"A value of type {runtime_type_name(target_value)} has no fields.",
             expected="a struct instance, package, or reflection value",
+            found=runtime_type_name(target_value),
+        )
+
+    def _read_index(
+        self,
+        target_value: object,
+        index_value: object,
+        location: SourceLocation,
+    ) -> object:
+        if isinstance(target_value, RuntimeMap):
+            return target_value.get(index_value, location)
+
+        raise RuntimeHoomerError(
+            location,
+            f"A value of type {runtime_type_name(target_value)} "
+            "does not support indexed access.",
+            expected="a map lookup such as `values[key]`",
             found=runtime_type_name(target_value),
         )
 
