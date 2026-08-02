@@ -70,7 +70,9 @@ end
 """,
             "numbers.hmr",
         )
-        interpreter.execute_source("import numbers\nprint Numbers.doubled(21)\n")
+        interpreter.execute_source(
+            "import numbers\nprint Numbers.doubled(21)\n"
+        )
 
         self.assertEqual(output.getvalue(), "42\n")
 
@@ -79,13 +81,12 @@ end
 
         self.assertEqual(output, "Hello\nWorld\n")
 
-    def test_ordinary_calls_may_omit_parentheses_when_unambiguous(self) -> None:
-        source_code = """fn greet(name, punctuation: "!")
-    "Hello {name}{punctuation}"
+    def test_complete_call_statements_may_omit_parentheses(self) -> None:
+        source_code = """fn greet(greeting, name, punctuation: "!")
+    print "{greeting} {name}{punctuation}"
 end
 
-message = greet "Hirak", punctuation: "?"
-print message
+greet "Hello", "Hirak", punctuation: "?"
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -260,18 +261,18 @@ end
 user = Accounts.User(name: "Hirak", city: "Guwahati")
 
 when user
-    Accounts.User as response
+    Accounts.User as response:
         print response.name
-    else
+    else:
         print "wrong type"
 end
 
 when user.city
-    "Guwahati"
+    "Guwahati":
         print "local match"
-    nil
+    nil:
         print "missing"
-    else
+    else:
         print "elsewhere"
 end
 """
@@ -290,12 +291,12 @@ end
 
 result = DatabaseConnection(host: "localhost")
 database = when result
-    DatabaseConnection as connection
+    DatabaseConnection as connection:
         connection
-    DatabaseConnectionFailure as error
+    DatabaseConnectionFailure as error:
         print error.message
         nil
-    else
+    else:
         nil
 end
 
@@ -309,7 +310,7 @@ print database.host
     def test_when_requires_a_final_fallback_branch(self) -> None:
         with self.assertRaises(ParserError) as caught_error:
             run_hoomer("""when nil
-    nil
+    nil:
         print "nil"
 end
 """)
@@ -320,9 +321,9 @@ end
         _, output, _ = run_hoomer(
             """fn describe(value)
     when value
-        nil
+        nil:
             "missing"
-        else as unexpected
+        else as unexpected:
             "unexpected: {unexpected}"
     end
 end
@@ -337,9 +338,9 @@ print describe(42)
         with self.assertRaises(ParserError) as caught_error:
             run_hoomer(
                 """when nil
-    else
+    else:
         print "fallback"
-    nil
+    nil:
         print "unreachable"
 end
 """
@@ -398,7 +399,7 @@ print customer.name
 
         self.assertEqual(output, "Guest\n")
 
-    def test_inline_when_filters_a_parenthesis_free_call_result(self) -> None:
+    def test_nested_calls_require_parentheses(self) -> None:
         source_code = """struct User name end
 struct UserNotFound id end
 
@@ -406,13 +407,16 @@ fn find_user!(id)
     return UserNotFound(id: id)
 end
 
-user = find_user! 10 when User else nil
+user = find_user!(10) when User else nil
 print user
 """
 
         _, output, _ = run_hoomer(source_code)
 
         self.assertEqual(output, "nil\n")
+
+        with self.assertRaises(ParserError):
+            run_hoomer("value = find_user! 10 when User else nil\n")
 
     def test_inline_when_evaluates_its_value_once_and_fallback_lazily(self) -> None:
         source_code = """struct Probe calls: 0 end
@@ -473,7 +477,7 @@ print wrong_answer
 
         self.assertIn("uses `else`", str(caught_error.exception))
 
-    def test_fallible_result_must_be_used_or_explicitly_ignored(self) -> None:
+    def test_fallible_result_must_be_used_or_propagated(self) -> None:
         definition = """fn save_user!()
     return nil
 end
@@ -484,7 +488,17 @@ end
 
         self.assertIn("result of fallible function", str(caught_error.exception))
 
-        _, _, _ = run_hoomer(definition + "ignore save_user!()\n")
+        _, output, _ = run_hoomer(
+            definition
+            + """fn persist!()
+    try save_user!()
+    "saved"
+end
+
+print persist!()
+"""
+        )
+        self.assertEqual(output, "saved\n")
 
     def test_final_fallible_call_can_be_returned_implicitly(self) -> None:
         _, output, _ = run_hoomer(
@@ -519,16 +533,6 @@ print wrapper()
             )
 
         self.assertIn("result of fallible function", str(caught_error.exception))
-
-    def test_ignore_rejects_an_ordinary_function(self) -> None:
-        with self.assertRaises(RuntimeHoomerError) as caught_error:
-            run_hoomer("""fn save_user()
-end
-
-ignore save_user()
-""")
-
-        self.assertIn("reserved for deliberately discarded fallible", str(caught_error.exception))
 
     def test_lists_for_loops_and_continue_work_together(self) -> None:
         source_code = """struct User

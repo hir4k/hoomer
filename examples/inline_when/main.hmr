@@ -4,7 +4,7 @@ struct DatabaseConnection
     host,
 end
 
-struct DatabaseConnectionError
+error DatabaseConnectionError
     message,
 end
 

@@ -5,21 +5,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.functions import BuiltinFunction, RuntimeBlock, RuntimeFunction
     from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
+    from hoomer.runtime.types import RuntimeType
 
 
 def runtime_type_name(value: object) -> str:
     """Return a Hoomer-facing type name rather than a Python implementation name."""
 
-    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.functions import BuiltinFunction, RuntimeBlock, RuntimeFunction
     from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
+    from hoomer.runtime.types import RuntimeType
 
     if value is None:
         return "nil"
@@ -32,10 +34,12 @@ def runtime_type_name(value: object) -> str:
     if isinstance(value, RuntimeStructInstance):
         return value.definition.name
     if isinstance(value, RuntimeStructDefinition):
-        return "struct"
+        return "type"
+    if isinstance(value, RuntimeType):
+        return "type"
     if isinstance(value, RuntimePackage):
         return "package"
-    if isinstance(value, (RuntimeFunction, NativeFunction, RuntimeBlock)):
+    if isinstance(value, (RuntimeFunction, BuiltinFunction, RuntimeBlock)):
         return "function"
     if isinstance(value, ReflectionValue):
         return value.kind
@@ -56,11 +60,12 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
     ``User(name: "Hirak")`` is easier to read than ``User(name: Hirak)``.
     """
 
-    from hoomer.runtime.functions import NativeFunction, RuntimeBlock, RuntimeFunction
+    from hoomer.runtime.functions import BuiltinFunction, RuntimeBlock, RuntimeFunction
     from hoomer.runtime.maps import RuntimeMap
     from hoomer.runtime.packages import RuntimePackage
     from hoomer.runtime.reflection import ReflectionValue
     from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
+    from hoomer.runtime.types import RuntimeType
 
     if value is None:
         return "nil"
@@ -96,7 +101,10 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
         )
         return f"{value.definition.name}({rendered_fields})"
     if isinstance(value, RuntimeStructDefinition):
-        return f"struct {value.name}"
+        declaration_kind = "error" if value.is_error else "struct"
+        return f"{declaration_kind} {value.name}"
+    if isinstance(value, RuntimeType):
+        return value.name
     if isinstance(value, RuntimePackage):
         return f"package {value.name} ({value.import_path})"
     if isinstance(value, ReflectionValue):
@@ -105,11 +113,39 @@ def format_runtime_value(value: object, *, nested: bool = False) -> str:
             for name, field_value in value.fields.items()
         )
         return f"{value.kind}({rendered_fields})"
-    if isinstance(value, (RuntimeFunction, NativeFunction)):
+    if isinstance(value, (RuntimeFunction, BuiltinFunction)):
         return f"fn {value.name}"
     if isinstance(value, RuntimeBlock):
         return "do block"
     return str(value)
+
+
+def runtime_values_equal(left_value: object, right_value: object) -> bool:
+    """Compare Hoomer values without leaking Python's ``true == 1`` rule."""
+
+    if left_value is right_value:
+        return True
+
+    left_is_number = _is_number(left_value)
+    right_is_number = _is_number(right_value)
+    if left_is_number or right_is_number:
+        return left_is_number and right_is_number and left_value == right_value
+
+    if isinstance(left_value, list) or isinstance(right_value, list):
+        if not isinstance(left_value, list) or not isinstance(right_value, list):
+            return False
+        if len(left_value) != len(right_value):
+            return False
+        return all(
+            runtime_values_equal(left_item, right_item)
+            for left_item, right_item in zip(left_value, right_value, strict=True)
+        )
+
+    return type(left_value) is type(right_value) and left_value == right_value
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _quote_string(value: str) -> str:

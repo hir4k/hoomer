@@ -65,6 +65,7 @@ class CallExpression(Expression):
     callable_expression: Expression
     arguments: list[CallArgument]
     uses_parentheses: bool = True
+    block: Expression | None = None
 
 
 @dataclass(slots=True)
@@ -83,7 +84,13 @@ class IndexAccessExpression(Expression):
 class BlockExpression(Expression):
     """A ``do ... end`` body represented as a callable runtime value."""
 
+    parameter_names: list[str]
     statements: list[Statement]
+
+
+@dataclass(slots=True)
+class TryExpression(Expression):
+    expression: Expression
 
 
 @dataclass(slots=True)
@@ -124,11 +131,6 @@ class PrintStatement(Statement):
 
 
 @dataclass(slots=True)
-class IgnoreStatement(Statement):
-    expression: CallExpression
-
-
-@dataclass(slots=True)
 class ReturnStatement(Statement):
     expression: Expression | None
 
@@ -147,6 +149,7 @@ class FunctionParameterDefinition:
     location: SourceLocation
     is_named: bool
     default_value: Expression | None
+    is_block: bool = False
 
 
 @dataclass(slots=True)
@@ -169,6 +172,13 @@ class StructDefinition(Statement):
     name: str
     fields: list[StructFieldDefinition]
     is_public: bool = False
+    is_error: bool = False
+
+
+@dataclass(slots=True)
+class PublicConstantDefinition(Statement):
+    name: str
+    value: Expression
 
 
 @dataclass(slots=True)
@@ -191,10 +201,27 @@ class IfStatement(Statement):
 
 
 @dataclass(slots=True)
+class IfExpression(Expression):
+    branches: list[ConditionalBranch]
+    else_body: list[Statement] | None
+
+
+@dataclass(slots=True)
 class ForStatement(Statement):
     item_names: list[str]
     iterable_expression: Expression
     body: list[Statement]
+
+
+@dataclass(slots=True)
+class WhileStatement(Statement):
+    condition: Expression
+    body: list[Statement]
+
+
+@dataclass(slots=True)
+class BreakStatement(Statement):
+    pass
 
 
 @dataclass(slots=True)

@@ -34,19 +34,19 @@ pub struct Receipt
     coupon_code: nil,
 end
 
-pub struct ValidationError message end
+pub error ValidationError message end
 
-pub struct InventoryError
+pub error InventoryError
     product_name,
     requested,
     available,
 end
 
-pub struct PaymentError message end
+pub error PaymentError message end
 
 pub struct NotificationSent channel end
 
-pub struct NotificationError message end
+pub error NotificationError message end
 
-pub struct UnexpectedCheckoutError message end
+pub error UnexpectedCheckoutError message end
 

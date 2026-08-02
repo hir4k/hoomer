@@ -34,7 +34,7 @@
   ],
   "wordPattern": "(-?\\d+(?:\\.\\d+)?)|([A-Za-z_][A-Za-z0-9_]*!?)",
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(?:(?:pub\\s+)?(?:struct|fn)\\b|(?:if|elsif|else|when|for)\\b|.*\\bdo\\s*(?:#.*)?$)",
+    "increaseIndentPattern": "^\\s*(?:(?:pub\\s+)?(?:struct|error|fn)\\b|(?:if|elsif|else|when|for|while)\\b|.*\\bdo(?:\\s*\\([^)]*\\))?\\s*(?:#.*)?$)",
     "decreaseIndentPattern": "^\\s*(?:end|elsif|else)\\b"
   }
 }

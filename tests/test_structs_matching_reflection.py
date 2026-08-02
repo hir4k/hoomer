@@ -31,11 +31,11 @@ end
 
 fn describe(value)
     when value
-        User as result
+        User as result:
             "User: {result.name}"
-        nil
+        nil:
             "No value"
-        else
+        else:
             "Unknown value"
     end
 end
@@ -58,9 +58,9 @@ end
 result = DatabaseError(message: "Connection failed")
 
 when result
-    DatabaseError as response
+    DatabaseError as response:
         print response.message
-    else
+    else:
         print "Unexpected"
 end
 """
@@ -80,8 +80,8 @@ fn greet(user)
     return "Hello {user.name}"
 end
 
-user_info = reflect(User(name: "Hirak"))
-function_info = reflect(greet)
+user_info = reflection(User(name: "Hirak"))
+function_info = reflection(greet)
 print user_info.name
 print user_info.fields
 print function_info.name

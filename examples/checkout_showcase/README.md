@@ -29,14 +29,14 @@ python3 -m hoomer.main examples/checkout_showcase/hoomer/checkout
 | Data | `Struct.new`, keyword construction | `struct`, named field construction |
 | Functions | methods, defaults, keywords | `fn`, defaults, named parameters |
 | Visibility | module API | `pub` package API |
-| Error flow | ordinary result structs and `case` | ordinary result structs, `!`, and `when` |
+| Error flow | ordinary result structs and `case` | declared error values, `!`, `try`, and `when` |
 | Branching | `if`, `elsif`, `else`, `case` | `if`, `elsif`, `else`, full and inline `when` |
 | Collections | arrays, `each`, `sum` | lists, `for` |
 | Ranges | `1..3` | `1..3` |
-| Blocks | `do ... end`, `yield` | `do ... end`, block parameter |
-| Text | interpolation, `strip`, `downcase` | interpolation, imported `trim`, `lowercase` |
+| Blocks | `do ... end`, `yield` | `do ... end`, final `&block` parameter |
+| Text | interpolation, `strip`, `downcase` | interpolation |
 | State | struct field assignment | struct field assignment |
-| Introspection | `class`, `members`, `method` | `reflect` |
+| Introspection | `class`, `members`, `method` | built-in `reflection(value)` |
 | Control flow | `return`, `next`, implicit method values | early `return`, `continue`, implicit function and branch values |
 | Other values | numbers, strings, booleans, `nil`, arrays | numbers, strings, booleans, `nil`, lists |
 

@@ -21,10 +21,10 @@ Database.execute(query)
 ```
 
 Reflection maps an ordinary record struct to a table model. Fallible inserts
-return either the original record or an ordinary error struct, so callers can
+return either the original record or a declared error value, so callers can
 choose between full matching and compact inline `when`. The transaction API
-demonstrates how a library can provide a readable `do` block without special ORM
-grammar.
+demonstrates how a library can provide a readable closure through a final
+`&block` parameter without special ORM grammar.
 
 Run the example from the repository root:
 

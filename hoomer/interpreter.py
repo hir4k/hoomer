@@ -16,10 +16,11 @@ from hoomer.naming import SNAKE_CASE_PATTERN
 from hoomer.parser import Parser
 from hoomer.runtime.environment import Environment
 from hoomer.runtime.functions import (
-    NativeFunction,
+    BuiltinFunction,
     ReturnFromFunction,
     RuntimeBlock,
     RuntimeFunction,
+    SuppliedBlock,
 )
 from hoomer.runtime.maps import RuntimeMap
 from hoomer.runtime.packages import PackageRegistry, RuntimePackage
@@ -28,11 +29,21 @@ from hoomer.runtime.structs import (
     RuntimeFieldDefinition,
     RuntimeStructDefinition,
     RuntimeStructInstance,
+    is_error_value,
 )
-from hoomer.runtime.values import format_runtime_value, runtime_type_name
+from hoomer.runtime.types import BUILTIN_TYPES, is_type, value_is_type
+from hoomer.runtime.values import (
+    format_runtime_value,
+    runtime_type_name,
+    runtime_values_equal,
+)
 
 
 class ContinueLoop(Exception):
+    """Internal control-flow signal consumed by the nearest running loop."""
+
+
+class BreakLoop(Exception):
     """Internal control-flow signal consumed by the nearest running loop."""
 
 
@@ -63,6 +74,8 @@ class Interpreter:
         self._package_paths_being_loaded: set[str] = set()
         self._loaded_package_directories: dict[Path, RuntimePackage] = {}
         self._function_call_depth = 0
+        self._function_names: list[str] = []
+        self._function_fallibility: list[bool] = []
         self._loop_depth = 0
         self._install_builtins()
 
@@ -76,7 +89,10 @@ class Interpreter:
 
         output_buffer = io.StringIO()
         return (
-            cls(output=output_buffer, package_search_paths=package_search_paths),
+            cls(
+                output=output_buffer,
+                package_search_paths=package_search_paths,
+            ),
             output_buffer,
         )
 
@@ -344,7 +360,13 @@ class Interpreter:
 
         for program, file_environment in zip(programs, file_environments, strict=True):
             for statement in program.statements:
-                if self._is_constant_declaration(statement):
+                if isinstance(statement, ast.PublicConstantDefinition):
+                    self._define_public_package_constant(
+                        statement,
+                        file_environment,
+                        runtime_package,
+                    )
+                elif self._is_constant_declaration(statement):
                     self._define_package_constant(
                         statement.expression,
                         file_environment,
@@ -377,6 +399,8 @@ class Interpreter:
     def _package_declaration_name(statement: ast.Statement) -> str | None:
         if isinstance(statement, (ast.FunctionDefinition, ast.StructDefinition)):
             return statement.name
+        if isinstance(statement, ast.PublicConstantDefinition):
+            return statement.name
         if Interpreter._is_constant_declaration(statement):
             return statement.expression.target.name
         return None
@@ -406,7 +430,26 @@ class Interpreter:
             is_mutable=False,
             location=expression.location,
         )
-        runtime_package.make_public(constant_name)
+        runtime_package.register_member(constant_name)
+        return constant_value
+
+    def _define_public_package_constant(
+        self,
+        definition: ast.PublicConstantDefinition,
+        file_environment: Environment,
+        runtime_package: RuntimePackage,
+    ) -> object:
+        constant_value = self.evaluate_expression(
+            definition.value,
+            file_environment,
+        )
+        runtime_package.environment.define(
+            definition.name,
+            constant_value,
+            is_mutable=False,
+            location=definition.location,
+        )
+        runtime_package.make_public(definition.name)
         return constant_value
 
     def _invoke_main(self, runtime_package: RuntimePackage) -> object:
@@ -441,9 +484,14 @@ class Interpreter:
         self,
         statements: list[ast.Statement],
         environment: Environment,
+        *,
+        function_name: str,
+        is_fallible: bool,
     ) -> object:
         enclosing_loop_depth = self._loop_depth
         self._function_call_depth += 1
+        self._function_names.append(function_name)
+        self._function_fallibility.append(is_fallible)
         # A loop inside the caller is not a loop inside the called function.
         # Resetting the depth prevents ``continue`` in a helper from silently
         # continuing its caller's loop; loops created by the function increment
@@ -460,7 +508,39 @@ class Interpreter:
                 return return_signal.value
         finally:
             self._loop_depth = enclosing_loop_depth
+            self._function_fallibility.pop()
+            self._function_names.pop()
             self._function_call_depth -= 1
+
+    @property
+    def current_function_name(self) -> str:
+        if not self._function_names:
+            return "<top level>"
+        return self._function_names[-1]
+
+    @property
+    def current_function_is_fallible(self) -> bool:
+        return bool(self._function_fallibility and self._function_fallibility[-1])
+
+    def finish_function_call(
+        self,
+        function: RuntimeFunction,
+        result: object,
+        location: SourceLocation,
+    ) -> object:
+        if not is_error_value(result):
+            return result
+
+        result.add_error_frame(function.name, location)
+        if function.is_fallible:
+            return result
+
+        raise RuntimeHoomerError(
+            function.definition.location,
+            f"Function `{function.name}` returned an error but its name does not end in `!`.",
+            expected=f"rename it to `{function.name}!` or handle the error before returning",
+            found=result.definition.name,
+        )
 
     def execute_statements(
         self,
@@ -506,8 +586,8 @@ class Interpreter:
                         f"The result of fallible function "
                         f"`{callable_value.name}` is discarded.",
                         expected=(
-                            "handle it with `when`, store or return it, "
-                            "or explicitly `ignore` it"
+                            "propagate it with `try`, handle it with `when`, "
+                            "or store or return it"
                         ),
                         found=f"an unused call to `{callable_value.name}`",
                     )
@@ -525,21 +605,6 @@ class Interpreter:
             else:
                 expression_value = self.evaluate_expression(expression, environment)
             return expression_value
-
-        if isinstance(statement, ast.IgnoreStatement):
-            callable_value = self.evaluate_expression(
-                statement.expression.callable_expression,
-                environment,
-            )
-            if not self._is_fallible_callable(callable_value):
-                raise RuntimeHoomerError(
-                    statement.location,
-                    "`ignore` is reserved for deliberately discarded fallible results.",
-                    expected="a function ending in `!`",
-                    found=runtime_type_name(callable_value),
-                )
-            self._call_value(statement.expression, environment, callable_value)
-            return None
 
         if isinstance(statement, ast.PrintStatement):
             value = self.evaluate_expression(statement.expression, environment)
@@ -567,6 +632,18 @@ class Interpreter:
         if isinstance(statement, ast.StructDefinition):
             return self._define_struct(statement, environment, active_package)
 
+        if isinstance(statement, ast.PublicConstantDefinition):
+            constant_value = self.evaluate_expression(statement.value, environment)
+            environment.define(
+                statement.name,
+                constant_value,
+                is_mutable=False,
+                location=statement.location,
+            )
+            if active_package is not None:
+                active_package.make_public(statement.name)
+            return constant_value
+
         if isinstance(statement, ast.ImportStatement):
             return self._execute_import(statement, environment)
 
@@ -581,12 +658,25 @@ class Interpreter:
         if isinstance(statement, ast.ForStatement):
             return self._execute_for(statement, environment, active_package)
 
+        if isinstance(statement, ast.WhileStatement):
+            return self._execute_while(statement, environment, active_package)
+
+        if isinstance(statement, ast.BreakStatement):
+            if self._loop_depth == 0:
+                raise RuntimeHoomerError(
+                    statement.location,
+                    "`break` can only be used inside a loop.",
+                    expected="`break` between `for` or `while` and its `end`",
+                    found="`break` outside a loop",
+                )
+            raise BreakLoop()
+
         if isinstance(statement, ast.ContinueStatement):
             if self._loop_depth == 0:
                 raise RuntimeHoomerError(
                     statement.location,
-                    "`continue` can only be used inside a `for` loop.",
-                    expected="`continue` between `for ... in ...` and its `end`",
+                    "`continue` can only be used inside a loop.",
+                    expected="`continue` between `for` or `while` and its `end`",
                     found="`continue` outside a loop",
                 )
             raise ContinueLoop()
@@ -625,6 +715,36 @@ class Interpreter:
         if isinstance(expression, ast.CallExpression):
             return self._evaluate_call(expression, environment)
 
+        if isinstance(expression, ast.TryExpression):
+            call_expression = expression.expression
+            callable_value = self.evaluate_expression(
+                call_expression.callable_expression,
+                environment,
+            )
+            if not self._is_fallible_callable(callable_value):
+                raise RuntimeHoomerError(
+                    expression.location,
+                    "`try` can only call a fallible function.",
+                    expected="a function whose name ends in `!`",
+                    found=runtime_type_name(callable_value),
+                )
+            result = self._call_value(
+                call_expression,
+                environment,
+                callable_value,
+            )
+            if not is_error_value(result):
+                return result
+            if not self.current_function_is_fallible:
+                raise RuntimeHoomerError(
+                    expression.location,
+                    "`try` can only propagate an error from a fallible function.",
+                    expected="`try` inside a function whose name ends in `!`",
+                    found=f"`try` inside `{self.current_function_name}`",
+                )
+            result.add_error_frame(self.current_function_name, expression.location)
+            raise ReturnFromFunction(result)
+
         if isinstance(expression, ast.FieldAccessExpression):
             target_value = self.evaluate_expression(expression.target, environment)
             return self._read_field(target_value, expression.field_name, expression.location)
@@ -659,6 +779,14 @@ class Interpreter:
 
         if isinstance(expression, ast.InlineWhenExpression):
             return self._evaluate_inline_when(expression, environment)
+
+        if isinstance(expression, ast.IfExpression):
+            return self._execute_if(
+                expression,
+                environment,
+                None,
+                result_is_used=True,
+            )
 
         raise RuntimeHoomerError(
             expression.location,
@@ -709,6 +837,7 @@ class Interpreter:
             definition.name,
             runtime_fields,
             environment,
+            is_error=definition.is_error,
         )
         declaration_environment = (
             active_package.environment if active_package is not None else environment
@@ -771,7 +900,7 @@ class Interpreter:
 
     def _execute_if(
         self,
-        statement: ast.IfStatement,
+        statement: ast.IfStatement | ast.IfExpression,
         environment: Environment,
         active_package: RuntimePackage | None,
         *,
@@ -918,6 +1047,46 @@ class Interpreter:
                     )
                 except ContinueLoop:
                     continue
+                except BreakLoop:
+                    break
+        finally:
+            self._loop_depth -= 1
+        return last_value
+
+    def _execute_while(
+        self,
+        statement: ast.WhileStatement,
+        environment: Environment,
+        active_package: RuntimePackage | None,
+    ) -> object:
+        last_value: object = None
+        self._loop_depth += 1
+        try:
+            while True:
+                condition_value = self.evaluate_expression(
+                    statement.condition,
+                    environment,
+                )
+                if not isinstance(condition_value, bool):
+                    raise RuntimeHoomerError(
+                        statement.condition.location,
+                        "A `while` condition must produce a boolean.",
+                        expected="`true` or `false`",
+                        found=runtime_type_name(condition_value),
+                    )
+                if not condition_value:
+                    break
+
+                try:
+                    last_value = self.execute_statements(
+                        statement.body,
+                        Environment(environment),
+                        active_package,
+                    )
+                except ContinueLoop:
+                    continue
+                except BreakLoop:
+                    break
         finally:
             self._loop_depth -= 1
         return last_value
@@ -933,7 +1102,7 @@ class Interpreter:
         if isinstance(pattern, ast.NilPattern):
             return matched_value is None
         if isinstance(pattern, ast.LiteralPattern):
-            return matched_value == pattern.value
+            return runtime_values_equal(matched_value, pattern.value)
         if isinstance(pattern, ast.StructPattern):
             expected_struct = self._resolve_pattern_name_path(
                 pattern.name_path,
@@ -981,11 +1150,20 @@ class Interpreter:
         operand = self.evaluate_expression(expression.operand, environment)
         if expression.operator == "-" and self._is_number(operand):
             return -operand  # type: ignore[operator]
+        if expression.operator == "not":
+            if isinstance(operand, bool):
+                return not operand
+            raise RuntimeHoomerError(
+                expression.location,
+                "Operator `not` requires a boolean.",
+                expected="`true` or `false`",
+                found=runtime_type_name(operand),
+            )
 
         raise RuntimeHoomerError(
             expression.location,
             f"Operator `{expression.operator}` cannot be applied to {runtime_type_name(operand)}.",
-            expected="a number after unary `-`",
+            expected="a number after unary `-`, or a boolean after `not`",
             found=runtime_type_name(operand),
         )
 
@@ -1021,29 +1199,83 @@ class Interpreter:
         environment: Environment,
     ) -> object:
         left_value = self.evaluate_expression(expression.left_operand, environment)
-        right_value = self.evaluate_expression(expression.right_operand, environment)
         operator = expression.operator
+
+        if operator in {"and", "or"}:
+            if not isinstance(left_value, bool):
+                raise RuntimeHoomerError(
+                    expression.left_operand.location,
+                    f"The left side of `{operator}` must be a boolean.",
+                    expected="`true` or `false`",
+                    found=runtime_type_name(left_value),
+                )
+            if operator == "and" and not left_value:
+                return False
+            if operator == "or" and left_value:
+                return True
+
+            right_value = self.evaluate_expression(
+                expression.right_operand,
+                environment,
+            )
+            if not isinstance(right_value, bool):
+                raise RuntimeHoomerError(
+                    expression.right_operand.location,
+                    f"The right side of `{operator}` must be a boolean.",
+                    expected="`true` or `false`",
+                    found=runtime_type_name(right_value),
+                )
+            return right_value
+
+        right_value = self.evaluate_expression(expression.right_operand, environment)
+
+        if operator in {"is", "is not"}:
+            if not is_type(right_value):
+                raise RuntimeHoomerError(
+                    expression.right_operand.location,
+                    f"The right side of `{operator}` must name a type.",
+                    expected="a type such as `Int`, `String`, or a struct name",
+                    found=runtime_type_name(right_value),
+                )
+            matches = value_is_type(left_value, right_value)
+            return not matches if operator == "is not" else matches
 
         if operator == "in":
             if isinstance(right_value, RuntimeMap):
                 return right_value.contains(left_value, expression.location)
+            if isinstance(right_value, str):
+                if not isinstance(left_value, str):
+                    return False
+                return left_value in right_value
+            if isinstance(right_value, range):
+                return self._is_integer(left_value) and left_value in right_value
+            if isinstance(right_value, list):
+                return any(
+                    self._values_equal(left_value, item)
+                    for item in right_value
+                )
             raise RuntimeHoomerError(
                 expression.location,
-                "The right side of `in` must be a map.",
-                expected='a map such as `{"name": user}`',
+                "The right side of `in` must be a collection.",
+                expected="a list, map, range, or string",
                 found=runtime_type_name(right_value),
             )
 
         if operator == "==":
-            return left_value == right_value
+            return self._values_equal(left_value, right_value)
         if operator == "!=":
-            return left_value != right_value
+            return not self._values_equal(left_value, right_value)
 
         both_are_numbers = self._is_number(left_value) and self._is_number(right_value)
-        both_are_strings = isinstance(left_value, str) and isinstance(right_value, str)
+        either_is_string = isinstance(left_value, str) or isinstance(right_value, str)
+        if operator == "+" and either_is_string:
+            raise RuntimeHoomerError(
+                expression.location,
+                "Strings are combined with interpolation, not `+`.",
+                expected='a string such as "Hello {name}"',
+                found=f"{runtime_type_name(left_value)} + {runtime_type_name(right_value)}",
+            )
 
-        if operator == "+" and both_are_strings:
-            return left_value + right_value  # type: ignore[operator]
         if operator == "+" and both_are_numbers:
             return left_value + right_value  # type: ignore[operator]
         if operator == "-" and both_are_numbers:
@@ -1059,7 +1291,17 @@ class Interpreter:
                     found="0",
                 )
             return left_value / right_value  # type: ignore[operator]
+        if operator == "%" and both_are_numbers:
+            if right_value == 0:
+                raise RuntimeHoomerError(
+                    expression.location,
+                    "A number cannot use modulo zero.",
+                    expected="a non-zero right operand",
+                    found="0",
+                )
+            return left_value % right_value  # type: ignore[operator]
 
+        both_are_strings = isinstance(left_value, str) and isinstance(right_value, str)
         operands_are_comparable = both_are_numbers or both_are_strings
         if operands_are_comparable:
             if operator == ">":
@@ -1075,9 +1317,12 @@ class Interpreter:
             expression.location,
             f"Operator `{operator}` cannot combine {runtime_type_name(left_value)} "
             f"and {runtime_type_name(right_value)}.",
-            expected="two numbers, or two strings for a supported operation",
+            expected="two numbers for arithmetic, or comparable values for comparison",
             found=f"{runtime_type_name(left_value)} and {runtime_type_name(right_value)}",
         )
+
+    def _values_equal(self, left_value: object, right_value: object) -> bool:
+        return runtime_values_equal(left_value, right_value)
 
     def _evaluate_assignment(
         self,
@@ -1107,11 +1352,19 @@ class Interpreter:
                     assigned_value,
                     expression.target.location,
                 )
+            if isinstance(target_value, list):
+                list_index = self._require_list_index(
+                    target_value,
+                    index_value,
+                    expression.target.location,
+                )
+                target_value[list_index] = assigned_value
+                return assigned_value
             raise RuntimeHoomerError(
                 expression.target.location,
                 f"A value of type {runtime_type_name(target_value)} "
                 "does not support indexed assignment.",
-                expected="a map entry such as `values[key] = value`",
+                expected="a list item or map entry such as `values[key] = value`",
                 found=runtime_type_name(target_value),
             )
 
@@ -1181,6 +1434,17 @@ class Interpreter:
                 )
             named_arguments[argument.name] = argument_value
 
+        if expression.block is not None:
+            block_value = self.evaluate_expression(expression.block, environment)
+            if getattr(block_value, "call", None) is None:
+                raise RuntimeHoomerError(
+                    expression.block.location,
+                    "The value after `&` must be callable.",
+                    expected="a function or `do` block",
+                    found=runtime_type_name(block_value),
+                )
+            positional_arguments.append(SuppliedBlock(block_value))
+
         call_method = getattr(callable_value, "call", None)
         if call_method is None:
             raise RuntimeHoomerError(
@@ -1198,10 +1462,7 @@ class Interpreter:
 
     @staticmethod
     def _is_fallible_callable(callable_value: object) -> bool:
-        return (
-            isinstance(callable_value, RuntimeFunction)
-            and callable_value.is_fallible
-        )
+        return bool(getattr(callable_value, "is_fallible", False))
 
     def _read_field(
         self,
@@ -1231,14 +1492,43 @@ class Interpreter:
     ) -> object:
         if isinstance(target_value, RuntimeMap):
             return target_value.get(index_value, location)
+        if isinstance(target_value, list):
+            list_index = self._require_list_index(
+                target_value,
+                index_value,
+                location,
+            )
+            return target_value[list_index]
 
         raise RuntimeHoomerError(
             location,
             f"A value of type {runtime_type_name(target_value)} "
             "does not support indexed access.",
-            expected="a map lookup such as `values[key]`",
+            expected="a list or map lookup such as `values[index]`",
             found=runtime_type_name(target_value),
         )
+
+    def _require_list_index(
+        self,
+        values: list[object],
+        index_value: object,
+        location: SourceLocation,
+    ) -> int:
+        if not self._is_integer(index_value):
+            raise RuntimeHoomerError(
+                location,
+                "A list index must be an integer.",
+                expected="a whole number from 0 to the final list index",
+                found=runtime_type_name(index_value),
+            )
+        if index_value < 0 or index_value >= len(values):
+            raise RuntimeHoomerError(
+                location,
+                "This list index is outside the list.",
+                expected=f"an index from 0 to {max(0, len(values) - 1)}",
+                found=str(index_value),
+            )
+        return index_value
 
     def _interpolate_string(
         self,
@@ -1333,6 +1623,7 @@ class Interpreter:
             )
 
         loaded_package = self.package_registry.get(import_path)
+
         if loaded_package is not None:
             return loaded_package
 
@@ -1340,20 +1631,13 @@ class Interpreter:
             import_path
         )
         if package_directory is not None:
-            loaded_value = self._load_package_directory(
+            return self._load_imported_package_directory(
                 package_directory,
                 import_path,
                 location,
-                invoke_main=False,
             )
-            if not isinstance(loaded_value, RuntimePackage):
-                raise RuntimeHoomerError(
-                    location,
-                    f"Import `{import_path}` did not load a package value.",
-                )
-            return loaded_value
 
-        expected_import = "a project package or installed package"
+        expected_import = "a project or installed package"
         if self.project_root is not None:
             local_candidate = self.project_root.joinpath(*import_path.split("/"))
             if self._directory_contains_package(local_candidate):
@@ -1370,6 +1654,25 @@ class Interpreter:
             f"Could not find import `{import_path}`.",
             expected=expected_import,
             found="no matching package directory",
+        )
+
+    def _load_imported_package_directory(
+        self,
+        package_directory: Path,
+        import_path: str,
+        location: SourceLocation,
+    ) -> RuntimePackage:
+        loaded_value = self._load_package_directory(
+            package_directory,
+            import_path,
+            location,
+            invoke_main=False,
+        )
+        if isinstance(loaded_value, RuntimePackage):
+            return loaded_value
+        raise RuntimeHoomerError(
+            location,
+            f"Import `{import_path}` did not load a package value.",
         )
 
     def _resolve_import_directory(
@@ -1410,8 +1713,10 @@ class Interpreter:
         unique_candidates = list(dict.fromkeys(resolved_candidates))
         for candidate in unique_candidates:
             if self._directory_contains_package(candidate):
-                return candidate, [str(path) for path in unique_candidates]
-        return None, [str(path) for path in unique_candidates]
+                searched_locations = [str(path) for path in unique_candidates]
+                return candidate, searched_locations
+        searched_locations = [str(path) for path in unique_candidates]
+        return None, searched_locations
 
     @staticmethod
     def _directory_contains_package(directory: Path) -> bool:
@@ -1433,38 +1738,57 @@ class Interpreter:
         ).lower()
 
     def _install_builtins(self) -> None:
-        reflect_function = NativeFunction(
-            "reflect",
-            self._native_reflect,
-            ["value"],
-        )
-        self.global_environment.define("reflect", reflect_function, is_mutable=False)
+        for runtime_type in BUILTIN_TYPES:
+            self.global_environment.define(
+                runtime_type.name,
+                runtime_type,
+                is_mutable=False,
+            )
 
-        text_environment = Environment(self.global_environment)
-        text_package = RuntimePackage(
-            "Text",
-            "text",
-            text_environment,
-            is_builtin=True,
+        self.global_environment.define(
+            "reflection",
+            BuiltinFunction("reflection", self._builtin_reflect, ["value"]),
+            is_mutable=False,
         )
-        text_functions = [
-            NativeFunction("trim", self._native_trim, ["text"]),
-            NativeFunction("lowercase", self._native_lowercase, ["text"]),
+        reflection_functions = [
+            BuiltinFunction(
+                "reflection_get",
+                self._builtin_reflection_get,
+                ["value", "name"],
+            ),
+            BuiltinFunction(
+                "reflection_set",
+                self._builtin_reflection_set,
+                ["value", "name", "field_value"],
+            ),
+            BuiltinFunction(
+                "reflection_call",
+                self._builtin_reflection_call,
+                ["callable", "arguments", "named"],
+                is_fallible=True,
+            ),
+            BuiltinFunction(
+                "reflection_load",
+                self._builtin_load_package,
+                ["path"],
+            ),
         ]
-        for function in text_functions:
-            text_environment.define(function.name, function, is_mutable=False)
-            text_package.make_public(function.name)
-        self.package_registry.register_builtin(text_package)
+        for function in reflection_functions:
+            self.global_environment.define(
+                function.name,
+                function,
+                is_mutable=False,
+            )
 
-    def _native_reflect(
+    def _builtin_reflect(
         self,
         interpreter: Interpreter,
         positional_arguments: list[object],
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> ReflectionValue:
-        value = self._one_native_argument(
-            "reflect",
+        value = self._one_builtin_argument(
+            "reflection",
             "value",
             positional_arguments,
             named_arguments,
@@ -1472,39 +1796,182 @@ class Interpreter:
         )
         return reflect_runtime_value(value)
 
-    def _native_trim(
+    def _builtin_reflection_get(
         self,
         interpreter: Interpreter,
         positional_arguments: list[object],
         named_arguments: dict[str, object],
         location: SourceLocation,
-    ) -> str:
-        value = self._one_native_argument(
-            "trim",
-            "text",
+    ) -> object:
+        value, name = self._builtin_positional_arguments(
+            "reflection_get",
+            2,
             positional_arguments,
             named_arguments,
             location,
         )
-        return self._require_string_argument("trim", value, location).strip()
+        field_name = self._require_string_argument("get", name, location)
+        return self._read_field(value, field_name, location)
 
-    def _native_lowercase(
+    def _builtin_reflection_set(
         self,
         interpreter: Interpreter,
         positional_arguments: list[object],
         named_arguments: dict[str, object],
         location: SourceLocation,
-    ) -> str:
-        value = self._one_native_argument(
-            "lowercase",
-            "text",
+    ) -> object:
+        value, name, field_value = self._builtin_positional_arguments(
+            "reflection_set",
+            3,
             positional_arguments,
             named_arguments,
             location,
         )
-        return self._require_string_argument("lowercase", value, location).lower()
+        field_name = self._require_string_argument("set", name, location)
+        if not isinstance(value, RuntimeStructInstance):
+            raise RuntimeHoomerError(
+                location,
+                "Function `reflection_set` only mutates a struct instance.",
+                expected="a struct instance as its first argument",
+                found=runtime_type_name(value),
+            )
+        return value.set_field(field_name, field_value, location)
 
-    def _one_native_argument(
+    def _builtin_reflection_call(
+        self,
+        interpreter: Interpreter,
+        positional_arguments: list[object],
+        named_arguments: dict[str, object],
+        location: SourceLocation,
+    ) -> object:
+        if len(positional_arguments) != 1:
+            raise RuntimeHoomerError(
+                location,
+                "Function `reflection_call` needs one callable value.",
+                expected=(
+                    "`reflection_call(function, arguments: [], named: {})`"
+                ),
+                found=f"{len(positional_arguments)} positional arguments",
+            )
+
+        allowed_named_arguments = {"arguments", "named"}
+        unknown_names = set(named_arguments) - allowed_named_arguments
+        if unknown_names:
+            unknown_name = sorted(unknown_names)[0]
+            raise RuntimeHoomerError(
+                location,
+                f"Function `reflection_call` has no `{unknown_name}` argument.",
+                expected="`arguments:` or `named:`",
+                found=unknown_name,
+            )
+
+        callable_value = positional_arguments[0]
+        reflected_arguments = named_arguments.get("arguments", [])
+        reflected_named = named_arguments.get("named", RuntimeMap())
+        if not isinstance(reflected_arguments, list):
+            raise RuntimeHoomerError(
+                location,
+                "The `arguments:` value for `reflection_call` must be a list.",
+                expected="a list of positional argument values",
+                found=runtime_type_name(reflected_arguments),
+            )
+        if not isinstance(reflected_named, RuntimeMap):
+            raise RuntimeHoomerError(
+                location,
+                "The `named:` value for `reflection_call` must be a map.",
+                expected="a map from string names to argument values",
+                found=runtime_type_name(reflected_named),
+            )
+
+        call_method = getattr(callable_value, "call", None)
+        if call_method is None:
+            raise RuntimeHoomerError(
+                location,
+                "The first value given to `reflection_call` is not callable.",
+                expected="a function, struct type, or block",
+                found=runtime_type_name(callable_value),
+            )
+        reflected_named_arguments = self._reflection_named_arguments(
+            reflected_named,
+            location,
+        )
+        return call_method(
+            self,
+            list(reflected_arguments),
+            reflected_named_arguments,
+            location,
+        )
+
+    def _builtin_load_package(
+        self,
+        interpreter: Interpreter,
+        positional_arguments: list[object],
+        named_arguments: dict[str, object],
+        location: SourceLocation,
+    ) -> RuntimePackage:
+        path_value = self._one_builtin_argument(
+            "reflection_load",
+            "path",
+            positional_arguments,
+            named_arguments,
+            location,
+        )
+        package_path = self._require_string_argument(
+            "reflection_load",
+            path_value,
+            location,
+        )
+        path_segments = package_path.split("/")
+        path_is_valid = bool(path_segments) and all(
+            SNAKE_CASE_PATTERN.fullmatch(segment) is not None
+            for segment in path_segments
+        )
+        if not path_is_valid:
+            raise RuntimeHoomerError(
+                location,
+                "Dynamic package paths use connected snake_case segments.",
+                expected='a string such as "kenekoi/accounts" or "accounts"',
+                found=package_path,
+            )
+        return self._load_import_if_needed(package_path, location)
+
+    def _builtin_positional_arguments(
+        self,
+        function_name: str,
+        expected_count: int,
+        positional_arguments: list[object],
+        named_arguments: dict[str, object],
+        location: SourceLocation,
+    ) -> list[object]:
+        supplied_count = len(positional_arguments) + len(named_arguments)
+        if not named_arguments and len(positional_arguments) == expected_count:
+            return positional_arguments
+        raise RuntimeHoomerError(
+            location,
+            f"Function `{function_name}` expects "
+            f"{expected_count} positional arguments.",
+            expected=f"{expected_count} positional arguments",
+            found=f"{supplied_count} arguments",
+        )
+
+    def _reflection_named_arguments(
+        self,
+        reflected_named: RuntimeMap,
+        location: SourceLocation,
+    ) -> dict[str, object]:
+        named_arguments: dict[str, object] = {}
+        for argument_name, argument_value in reflected_named.items():
+            if not isinstance(argument_name, str):
+                raise RuntimeHoomerError(
+                    location,
+                    "Reflected named argument keys must be strings.",
+                    expected='a map such as {"name": "Hirak"}',
+                    found=runtime_type_name(argument_name),
+                )
+            named_arguments[argument_name] = argument_value
+        return named_arguments
+
+    def _one_builtin_argument(
         self,
         function_name: str,
         parameter_name: str,

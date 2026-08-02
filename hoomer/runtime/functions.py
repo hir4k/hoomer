@@ -1,4 +1,4 @@
-"""User functions, native functions, and ``do`` blocks."""
+"""User functions, built-in functions, and ``do`` blocks."""
 
 from __future__ import annotations
 
@@ -41,16 +41,32 @@ class RuntimeFunction:
 
     @property
     def positional_parameters(self) -> list[ast.FunctionParameterDefinition]:
-        return [parameter for parameter in self.parameters if not parameter.is_named]
+        return [
+            parameter
+            for parameter in self.parameters
+            if not parameter.is_named and not parameter.is_block
+        ]
 
     @property
     def named_parameters(self) -> list[ast.FunctionParameterDefinition]:
-        return [parameter for parameter in self.parameters if parameter.is_named]
+        return [
+            parameter
+            for parameter in self.parameters
+            if parameter.is_named and not parameter.is_block
+        ]
+
+    @property
+    def block_parameter(self) -> ast.FunctionParameterDefinition | None:
+        return next(
+            (parameter for parameter in self.parameters if parameter.is_block),
+            None,
+        )
 
     def accepts_arguments(
         self,
         positional_argument_count: int,
         named_argument_names: set[str],
+        has_block_argument: bool = False,
     ) -> bool:
         positional_count_is_valid = (
             positional_argument_count == len(self.positional_parameters)
@@ -64,11 +80,13 @@ class RuntimeFunction:
         }
         named_names_are_known = named_argument_names.issubset(allowed_named_names)
         required_names_are_present = required_named_names.issubset(named_argument_names)
+        block_presence_is_valid = has_block_argument == (self.block_parameter is not None)
 
         return (
             positional_count_is_valid
             and named_names_are_known
             and required_names_are_present
+            and block_presence_is_valid
         )
 
     def call(
@@ -78,7 +96,16 @@ class RuntimeFunction:
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> object:
-        if not self.accepts_arguments(len(positional_arguments), set(named_arguments)):
+        block_argument = None
+        if positional_arguments and isinstance(positional_arguments[-1], SuppliedBlock):
+            block_argument = positional_arguments[-1].value
+            positional_arguments = positional_arguments[:-1]
+
+        if not self.accepts_arguments(
+            len(positional_arguments),
+            set(named_arguments),
+            block_argument is not None,
+        ):
             self._raise_argument_error(positional_arguments, named_arguments, location)
 
         call_environment = Environment(self.closure_environment)
@@ -94,10 +121,20 @@ class RuntimeFunction:
             location,
         )
 
-        return interpreter.execute_function_body(
+        if self.block_parameter is not None:
+            call_environment.define(
+                self.block_parameter.name,
+                block_argument,
+                location=location,
+            )
+
+        result = interpreter.execute_function_body(
             self.definition.body,
             call_environment,
+            function_name=self.name,
+            is_fallible=self.is_fallible,
         )
+        return interpreter.finish_function_call(self, result, location)
 
     def _bind_positional_parameters(
         self,
@@ -150,24 +187,28 @@ class RuntimeFunction:
     def signature(self) -> str:
         rendered_parameters: list[str] = []
         for parameter in self.parameters:
-            rendered_name = parameter.name + (":" if parameter.is_named else "")
+            if parameter.is_block:
+                rendered_name = "&" + parameter.name
+            else:
+                rendered_name = parameter.name + (":" if parameter.is_named else "")
             if parameter.default_value is not None:
                 rendered_name += " <default>"
             rendered_parameters.append(rendered_name)
         return f"{self.name}({', '.join(rendered_parameters)})"
 
 
-NativeImplementation = Callable[
+BuiltinImplementation = Callable[
     ["Interpreter", list[object], dict[str, object], SourceLocation],
     object,
 ]
 
 
 @dataclass(slots=True)
-class NativeFunction:
+class BuiltinFunction:
     name: str
-    implementation: NativeImplementation
+    implementation: BuiltinImplementation
     parameter_names: list[str]
+    is_fallible: bool = False
 
     @property
     def arity(self) -> int:
@@ -189,7 +230,7 @@ class NativeFunction:
 
 
 class RuntimeBlock:
-    """A zero-parameter closure created by a trailing ``do ... end`` block."""
+    """A parameterized closure created by a trailing ``do ... end`` block."""
 
     name = "<block>"
     parameter_names: list[str] = []
@@ -198,6 +239,8 @@ class RuntimeBlock:
     def __init__(self, expression: ast.BlockExpression, closure: Environment) -> None:
         self.expression = expression
         self.closure = closure
+        self.parameter_names = expression.parameter_names
+        self.arity = len(self.parameter_names)
 
     def call(
         self,
@@ -206,14 +249,30 @@ class RuntimeBlock:
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> object:
-        if positional_arguments or named_arguments:
+        if named_arguments or len(positional_arguments) != self.arity:
             raise RuntimeHoomerError(
                 location,
-                "This `do` block does not accept arguments.",
-                expected="no arguments",
+                "This `do` block received arguments that do not match its parameters.",
+                expected=f"{self.arity} positional argument(s)",
                 found=f"{len(positional_arguments) + len(named_arguments)} argument(s)",
             )
+        call_environment = Environment(self.closure)
+        for name, value in zip(
+            self.parameter_names,
+            positional_arguments,
+            strict=True,
+        ):
+            call_environment.define(name, value, location=location)
         return interpreter.execute_function_body(
             self.expression.statements,
-            Environment(self.closure),
+            call_environment,
+            function_name="<block>",
+            is_fallible=interpreter.current_function_is_fallible,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class SuppliedBlock:
+    """Keep the trailing block separate from ordinary positional arguments."""
+
+    value: object

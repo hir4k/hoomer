@@ -51,7 +51,7 @@ class LexerTests(unittest.TestCase):
 
     def test_lexer_recognizes_visibility_list_and_loop_tokens(self) -> None:
         tokens = Lexer(
-            "package Accounts\npub for user in [users]\ncontinue\nignore save!()\n"
+            "package Accounts\npub for user in [users]\ncontinue\ntry save!()\n"
         ).scan_tokens()
 
         self.assertEqual(
@@ -70,7 +70,7 @@ class LexerTests(unittest.TestCase):
                 TokenType.NEWLINE,
                 TokenType.CONTINUE,
                 TokenType.NEWLINE,
-                TokenType.IGNORE,
+                TokenType.TRY,
                 TokenType.IDENTIFIER,
                 TokenType.LEFT_PARENTHESIS,
                 TokenType.RIGHT_PARENTHESIS,
@@ -82,6 +82,11 @@ class LexerTests(unittest.TestCase):
     def test_question_mark_is_not_part_of_a_function_name(self) -> None:
         with self.assertRaises(LexerError):
             Lexer("fn active?(user)\nend\n").scan_tokens()
+
+    def test_ignore_is_an_ordinary_identifier(self) -> None:
+        tokens = Lexer("ignore\n").scan_tokens()
+
+        self.assertEqual(tokens[0].token_type, TokenType.IDENTIFIER)
 
     def test_lexer_distinguishes_ranges_from_field_access_and_decimals(self) -> None:
         tokens = Lexer("for number in 0..10\nuser.score 1.5\n").scan_tokens()

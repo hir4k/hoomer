@@ -14,10 +14,10 @@ end
 
 fn show_create_error(result)
     when result
-        Database.ModelMismatchError as error
+        Database.ModelMismatchError as error:
             print "Model mismatch: {error.table} accepts {error.expected_model}, not {error.received_model}"
 
-        else
+        else:
             print "Unexpected create result"
     end
 end

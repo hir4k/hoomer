@@ -62,10 +62,12 @@ class Lexer:
             "]": TokenType.RIGHT_BRACKET,
             ",": TokenType.COMMA,
             ":": TokenType.COLON,
+            "&": TokenType.AMPERSAND,
             "+": TokenType.PLUS,
             "-": TokenType.MINUS,
             "*": TokenType.STAR,
             "/": TokenType.SLASH,
+            "%": TokenType.PERCENT,
         }
 
         if current_character in single_character_tokens:

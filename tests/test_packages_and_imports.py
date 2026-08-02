@@ -10,6 +10,48 @@ from tests.helpers import run_hoomer
 
 
 class PackagesAndImportsTests(unittest.TestCase):
+    def test_language_does_not_reserve_standard_package_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_root = Path(temporary_directory)
+            external_io_directory = package_root / "std" / "io"
+            external_io_directory.mkdir(parents=True)
+            (external_io_directory / "io.hmr").write_text(
+                """package IO
+
+pub fn message()
+    "ordinary dependency"
+end
+""",
+                encoding="utf-8",
+            )
+
+            interpreter, output = Interpreter.capture_output(
+                package_search_paths=[package_root]
+            )
+            interpreter.execute_source(
+                "import std/io\nprint IO.message()\n"
+            )
+
+        loaded_io = interpreter.package_registry.get("std/io")
+        self.assertIsNotNone(loaded_io)
+        self.assertEqual(output.getvalue(), "ordinary dependency\n")
+        self.assertEqual(loaded_io.source_directory, external_io_directory.resolve())
+
+    def test_project_can_use_a_former_standard_package_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory) / "std"
+            package_directory = project_root / "io"
+            package_directory.mkdir(parents=True)
+            (project_root / "hoomer.toml").write_text("", encoding="utf-8")
+            (package_directory / "io.hmr").write_text(
+                "package IO\n\nfn main\nend\n",
+                encoding="utf-8",
+            )
+
+            loaded_package = Interpreter().check_package(package_directory)
+
+        self.assertEqual(loaded_package.import_path, "std/io")
+
     def test_package_header_owns_the_file_until_end_of_file(self) -> None:
         interpreter, output = Interpreter.capture_output()
         interpreter.execute_source(
@@ -27,7 +69,8 @@ end
         )
 
         interpreter.execute_source(
-            "import accounts\nprint Accounts.login()\nprint Accounts.logout()\n"
+            "import accounts\nprint Accounts.login()\n"
+            "print Accounts.logout()\n"
         )
 
         self.assertEqual(output.getvalue(), "logged in\nlogged out\n")
@@ -39,11 +82,8 @@ end
             (package_directory / "user.hmr").write_text(
                 """package Accounts
 
-import text:
-    trim
-
 fn normalized_name(name)
-    trim(name)
+    name
 end
 """,
                 encoding="utf-8",
@@ -51,12 +91,13 @@ end
             (package_directory / "login.hmr").write_text(
                 """package Accounts
 
+
 fn login(name)
     normalized_name(name)
 end
 
 fn main
-    print login("  Hirak  ")
+    print login("Hirak")
 end
 """,
                 encoding="utf-8",
@@ -69,16 +110,28 @@ end
 
     def test_imports_are_file_scoped(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            package_directory = Path(temporary_directory) / "accounts"
+            package_root = Path(temporary_directory)
+            package_directory = package_root / "accounts"
+            tools_directory = package_root / "tools"
             package_directory.mkdir()
+            tools_directory.mkdir()
+            (tools_directory / "tools.hmr").write_text(
+                """package Tools
+
+pub fn normalize(name)
+    name
+end
+""",
+                encoding="utf-8",
+            )
             (package_directory / "user.hmr").write_text(
                 """package Accounts
 
-import text:
-    trim
+import tools:
+    normalize
 
 fn normalized_name(name)
-    trim(name)
+    normalize(name)
 end
 """,
                 encoding="utf-8",
@@ -86,18 +139,19 @@ end
             (package_directory / "main.hmr").write_text(
                 """package Accounts
 
+
 fn main
-    print trim("  unavailable here  ")
+    print normalize("unavailable here")
 end
 """,
                 encoding="utf-8",
             )
 
-            interpreter = Interpreter()
+            interpreter = Interpreter(package_search_paths=[package_root])
             with self.assertRaises(RuntimeHoomerError) as caught_error:
                 interpreter.execute_package(package_directory)
 
-        self.assertIn("`trim` has not been defined", str(caught_error.exception))
+        self.assertIn("`normalize` has not been defined", str(caught_error.exception))
 
     def test_whole_package_imports_are_file_scoped(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -115,7 +169,8 @@ end
                 encoding="utf-8",
             )
             (application_directory / "main.hmr").write_text(
-                "package Application\n\nfn main\n    print Accounts.name()\nend\n",
+                "package Application\n\nfn main\n"
+                "    print Accounts.name()\nend\n",
                 encoding="utf-8",
             )
 
@@ -284,7 +339,7 @@ end
 
         interpreter.execute_source(
             """import accounts
-package_info = reflect(Accounts)
+package_info = reflection(Accounts)
 print package_info.name
 print package_info.path
 print package_info.functions
@@ -302,14 +357,16 @@ print package_info.structs
         interpreter.execute_source(
             """package Accounts
 
-MAX_LOGIN_ATTEMPTS = 5
-SUPPORTED_PORTS = [3000, 3001]
+pub MAX_LOGIN_ATTEMPTS = 5
+pub SUPPORTED_PORTS = [3000, 3001]
 """,
             "accounts.hmr",
         )
 
         interpreter.execute_source(
-            "import accounts\nprint Accounts.MAX_LOGIN_ATTEMPTS\nprint Accounts.SUPPORTED_PORTS\n"
+            "import accounts\n"
+            "print Accounts.MAX_LOGIN_ATTEMPTS\n"
+            "print Accounts.SUPPORTED_PORTS\n"
         )
 
         self.assertEqual(output.getvalue(), "5\n[3000, 3001]\n")

@@ -21,10 +21,12 @@ class TokenType(Enum):
     DOT = auto()
     RANGE = auto()
     COLON = auto()
+    AMPERSAND = auto()
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
+    PERCENT = auto()
     WILDCARD = auto()
 
     # Operators that may contain a second character.
@@ -51,11 +53,17 @@ class TokenType(Enum):
     WHEN = auto()
     AS = auto()
     DO = auto()
+    TRY = auto()
     RETURN = auto()
-    IGNORE = auto()
     PUBLIC = auto()
     FOR = auto()
+    WHILE = auto()
     IN = auto()
+    IS = auto()
+    AND = auto()
+    OR = auto()
+    NOT = auto()
+    BREAK = auto()
     CONTINUE = auto()
     TRUE = auto()
     FALSE = auto()
@@ -77,11 +85,17 @@ KEYWORD_TOKEN_TYPES: dict[str, TokenType] = {
     "when": TokenType.WHEN,
     "as": TokenType.AS,
     "do": TokenType.DO,
+    "try": TokenType.TRY,
     "return": TokenType.RETURN,
-    "ignore": TokenType.IGNORE,
     "pub": TokenType.PUBLIC,
     "for": TokenType.FOR,
+    "while": TokenType.WHILE,
     "in": TokenType.IN,
+    "is": TokenType.IS,
+    "and": TokenType.AND,
+    "or": TokenType.OR,
+    "not": TokenType.NOT,
+    "break": TokenType.BREAK,
     "continue": TokenType.CONTINUE,
     "true": TokenType.TRUE,
     "false": TokenType.FALSE,

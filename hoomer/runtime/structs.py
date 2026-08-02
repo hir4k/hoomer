@@ -20,6 +20,12 @@ class RuntimeFieldDefinition:
     default_expression: ast.Expression | None
 
 
+@dataclass(frozen=True, slots=True)
+class ErrorTraceFrame:
+    function_name: str
+    location: SourceLocation
+
+
 class RuntimeStructDefinition:
     """A callable struct schema with unevaluated field defaults.
 
@@ -34,10 +40,13 @@ class RuntimeStructDefinition:
         name: str,
         fields: list[RuntimeFieldDefinition],
         definition_environment: Environment,
+        *,
+        is_error: bool = False,
     ) -> None:
         self.name = name
         self.fields = fields
         self.definition_environment = definition_environment
+        self.is_error = is_error
 
     def call(
         self,
@@ -46,10 +55,11 @@ class RuntimeStructDefinition:
         named_arguments: dict[str, object],
         location: SourceLocation,
     ) -> RuntimeStructInstance:
+        declaration_kind = "Error" if self.is_error else "Struct"
         if positional_arguments:
             raise RuntimeHoomerError(
                 location,
-                f"Struct `{self.name}` is constructed with named fields.",
+                f"{declaration_kind} `{self.name}` is constructed with named fields.",
                 expected=f"`{self.name}(field_name: value)`",
                 found=f"{len(positional_arguments)} positional argument(s)",
             )
@@ -60,7 +70,7 @@ class RuntimeStructDefinition:
             unknown_name = sorted(unknown_field_names)[0]
             raise RuntimeHoomerError(
                 location,
-                f"Struct `{self.name}` has no field named `{unknown_name}`.",
+                f"{declaration_kind} `{self.name}` has no field named `{unknown_name}`.",
                 expected="one of: " + ", ".join(sorted(known_field_names)),
                 found=unknown_name,
             )
@@ -74,7 +84,7 @@ class RuntimeStructDefinition:
         if missing_required_fields:
             raise RuntimeHoomerError(
                 location,
-                f"Struct `{self.name}` is missing required fields.",
+                f"{declaration_kind} `{self.name}` is missing required fields.",
                 expected="named values for: " + ", ".join(missing_required_fields),
                 found="no value for: " + ", ".join(missing_required_fields),
             )
@@ -89,13 +99,22 @@ class RuntimeStructDefinition:
                 )
             instance_fields[field_definition.name] = field_value
 
-        return RuntimeStructInstance(self, instance_fields)
+        trace = []
+        if self.is_error:
+            trace.append(
+                ErrorTraceFrame(
+                    interpreter.current_function_name,
+                    location,
+                )
+            )
+        return RuntimeStructInstance(self, instance_fields, trace)
 
 
 @dataclass(slots=True, eq=False)
 class RuntimeStructInstance:
     definition: RuntimeStructDefinition
     fields: OrderedDict[str, object]
+    error_trace: list[ErrorTraceFrame]
 
     def get_field(self, field_name: str, location: SourceLocation) -> object:
         if field_name in self.fields:
@@ -119,3 +138,19 @@ class RuntimeStructInstance:
 
         self.fields[field_name] = value
         return value
+
+    @property
+    def is_error(self) -> bool:
+        return self.definition.is_error
+
+    def add_error_frame(self, function_name: str, location: SourceLocation) -> None:
+        if not self.is_error:
+            return
+        frame = ErrorTraceFrame(function_name, location)
+        if self.error_trace and self.error_trace[-1] == frame:
+            return
+        self.error_trace.append(frame)
+
+
+def is_error_value(value: object) -> bool:
+    return isinstance(value, RuntimeStructInstance) and value.is_error

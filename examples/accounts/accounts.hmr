@@ -11,12 +11,12 @@ pub struct User
     city: nil,
 end
 
-pub struct ValidationError
+pub error ValidationError
     field,
     message,
 end
 
-pub struct DatabaseError
+pub error DatabaseError
     message,
     code: nil,
 end

@@ -81,17 +81,31 @@ class Parser:
         if self._match(TokenType.IMPORT):
             return self._parse_import(self._previous())
         if self._match(TokenType.STRUCT):
-            return self._parse_struct_definition(self._previous(), is_public=False)
+            return self._parse_struct_definition(
+                self._previous(),
+                is_public=False,
+                is_error=False,
+            )
+        if self._starts_error_definition():
+            self._advance()
+            return self._parse_struct_definition(
+                self._previous(),
+                is_public=False,
+                is_error=True,
+            )
         if self._match(TokenType.FUNCTION):
             return self._parse_function_definition(self._previous(), is_public=False)
         if self._match(TokenType.IF):
             return self._parse_if_statement(self._previous())
         if self._match(TokenType.RETURN):
             return self._parse_return_statement(self._previous())
-        if self._match(TokenType.IGNORE):
-            return self._parse_ignore_statement(self._previous())
         if self._match(TokenType.FOR):
             return self._parse_for_statement(self._previous())
+        if self._match(TokenType.WHILE):
+            return self._parse_while_statement(self._previous())
+        if self._match(TokenType.BREAK):
+            break_token = self._previous()
+            return ast.BreakStatement(break_token.location)
         if self._match(TokenType.CONTINUE):
             continue_token = self._previous()
             return ast.ContinueStatement(continue_token.location)
@@ -104,7 +118,7 @@ class Parser:
             value_to_print = self._parse_expression()
             return ast.PrintStatement(print_token.location, value_to_print)
 
-        expression = self._parse_expression()
+        expression = self._parse_expression(allow_parenthesis_free_call=True)
 
         if self._match(TokenType.DO):
             expression = self._attach_do_block(expression, self._previous())
@@ -115,12 +129,38 @@ class Parser:
         if self._match(TokenType.FUNCTION):
             return self._parse_function_definition(self._previous(), is_public=True)
         if self._match(TokenType.STRUCT):
-            return self._parse_struct_definition(self._previous(), is_public=True)
+            return self._parse_struct_definition(
+                self._previous(),
+                is_public=True,
+                is_error=False,
+            )
+        if self._match_contextual_keyword("error"):
+            return self._parse_struct_definition(
+                self._previous(),
+                is_public=True,
+                is_error=True,
+            )
+
+        if self._check(TokenType.IDENTIFIER):
+            name_token = self._peek()
+            if CONSTANT_CASE_PATTERN.fullmatch(name_token.lexeme) is not None:
+                self._advance()
+                self._consume(
+                    TokenType.ASSIGN,
+                    "A public constant needs `=` after its name.",
+                    f"`pub {name_token.lexeme} = value`",
+                )
+                value = self._parse_expression()
+                return ast.PublicConstantDefinition(
+                    name_token.location,
+                    name_token.lexeme,
+                    value,
+                )
 
         raise ParserError(
             self._peek().location,
-            "`pub` can only expose a function or struct from its package.",
-            expected="`fn` or `struct`",
+            "`pub` can only expose a function, struct, error, or constant from its package.",
+            expected="`fn`, `struct`, `error`, or a CONSTANT_NAME",
             found=self._peek().describe(),
         )
 
@@ -193,9 +233,19 @@ class Parser:
         parameter_names: set[str] = set()
         has_seen_named_parameter = False
         has_seen_defaulted_named_parameter = False
+        has_block_parameter = False
         self._skip_newlines()
 
         while not self._check(TokenType.RIGHT_PARENTHESIS):
+            is_block_parameter = self._match(TokenType.AMPERSAND)
+            if is_block_parameter and has_block_parameter:
+                raise ParserError(
+                    self._previous().location,
+                    f"Function `{function_name}` can declare only one block parameter.",
+                    expected="one final block parameter such as `&action`",
+                    found="another `&` block parameter",
+                )
+
             parameter_token = self._consume(
                 TokenType.IDENTIFIER,
                 "Function parameters must be variable names.",
@@ -210,6 +260,27 @@ class Parser:
                     found=parameter_token.lexeme,
                 )
             parameter_names.add(parameter_token.lexeme)
+
+            if is_block_parameter:
+                has_block_parameter = True
+                parameters.append(
+                    ast.FunctionParameterDefinition(
+                        parameter_token.lexeme,
+                        parameter_token.location,
+                        False,
+                        None,
+                        True,
+                    )
+                )
+                self._skip_newlines()
+                if self._match(TokenType.COMMA):
+                    raise ParserError(
+                        self._previous().location,
+                        "The block parameter must be the final function parameter.",
+                        expected="`)` after the block parameter",
+                        found="`,` after the block parameter",
+                    )
+                break
 
             is_named_parameter = self._match(TokenType.COLON)
             if is_named_parameter:
@@ -261,6 +332,7 @@ class Parser:
                     parameter_token.location,
                     is_named_parameter,
                     default_value,
+                    False,
                 )
             )
 
@@ -278,10 +350,12 @@ class Parser:
         struct_token: Token,
         *,
         is_public: bool,
+        is_error: bool,
     ) -> ast.StructDefinition:
+        declaration_kind = "error" if is_error else "struct"
         name_token = self._consume(
             TokenType.IDENTIFIER,
-            "Every struct needs a name after `struct`.",
+            f"Every {declaration_kind} needs a name after `{declaration_kind}`.",
             "a PascalCase struct name",
         )
         validate_struct_name(name_token.lexeme, name_token.location)
@@ -299,7 +373,8 @@ class Parser:
             if field_token.lexeme in field_names:
                 raise ParserError(
                     field_token.location,
-                    f"Struct `{name_token.lexeme}` declares `{field_token.lexeme}` more than once.",
+                    f"{declaration_kind.capitalize()} `{name_token.lexeme}` declares "
+                    f"`{field_token.lexeme}` more than once.",
                     expected="a unique field name",
                     found=field_token.lexeme,
                 )
@@ -352,12 +427,17 @@ class Parser:
                     found=self._peek().describe(),
                 )
 
-        self._consume(TokenType.END, "This struct is missing its closing `end`.", "`end`")
+        self._consume(
+            TokenType.END,
+            f"This {declaration_kind} is missing its closing `end`.",
+            "`end`",
+        )
         return ast.StructDefinition(
             struct_token.location,
             name_token.lexeme,
             fields,
             is_public,
+            is_error,
         )
 
     def _parse_package_header(self) -> str:
@@ -390,6 +470,16 @@ class Parser:
         """
 
         for statement in package_statements:
+            if isinstance(statement, ast.PublicConstantDefinition):
+                if self._is_inert_constant_value(statement.value):
+                    continue
+                raise PackageContentError(
+                    statement.value.location,
+                    "Package constants cannot execute code while their package loads.",
+                    expected="an inert literal, list, map, range, or arithmetic expression",
+                    found="a value that reads a name or calls a function",
+                )
+
             if self._is_package_constant_declaration(statement):
                 constant_expression = statement.expression
                 if self._is_inert_constant_value(constant_expression.value):
@@ -421,6 +511,9 @@ class Parser:
             statement,
             (ast.ImportStatement, ast.StructDefinition, ast.FunctionDefinition),
         ):
+            return True
+
+        if isinstance(statement, ast.PublicConstantDefinition):
             return True
 
         if not isinstance(statement, ast.ExpressionStatement):
@@ -539,10 +632,10 @@ class Parser:
             # This avoids assigning semantic meaning to indentation. For example:
             #
             #     import text:
-            #         trim,
-            #         lowercase
+            #         sanitize,
+            #         validate
             #
-            # ``lowercase`` has no comma, so the following line begins a normal
+            # ``validate`` has no comma, so the following line begins a normal
             # statement even if both lines happen to use the same indentation.
             while True:
                 selected_token = self._consume(
@@ -614,6 +707,34 @@ class Parser:
         self._consume(TokenType.END, "This `if` expression is missing its closing `end`.", "`end`")
         return ast.IfStatement(if_token.location, branches, else_body)
 
+    def _parse_if_expression(self, if_token: Token) -> ast.IfExpression:
+        first_condition = self._parse_expression()
+        self._require_line_after_header("if condition")
+        first_body = self._parse_block_until(
+            lambda: self._check_any(TokenType.ELSIF, TokenType.ELSE, TokenType.END)
+        )
+        branches = [ast.ConditionalBranch(first_condition, first_body)]
+
+        while self._match(TokenType.ELSIF):
+            branch_condition = self._parse_expression()
+            self._require_line_after_header("elsif condition")
+            branch_body = self._parse_block_until(
+                lambda: self._check_any(TokenType.ELSIF, TokenType.ELSE, TokenType.END)
+            )
+            branches.append(ast.ConditionalBranch(branch_condition, branch_body))
+
+        else_body = None
+        if self._match(TokenType.ELSE):
+            self._require_line_after_header("else")
+            else_body = self._parse_block_until(lambda: self._check(TokenType.END))
+
+        self._consume(
+            TokenType.END,
+            "This `if` expression is missing its closing `end`.",
+            "`end`",
+        )
+        return ast.IfExpression(if_token.location, branches, else_body)
+
     def _parse_for_statement(self, for_token: Token) -> ast.ForStatement:
         first_item_token = self._consume(
             TokenType.IDENTIFIER,
@@ -658,26 +779,38 @@ class Parser:
             body,
         )
 
+    def _parse_while_statement(self, while_token: Token) -> ast.WhileStatement:
+        condition = self._parse_expression()
+        self._require_line_after_header("while condition")
+        body = self._parse_block_until(lambda: self._check(TokenType.END))
+        self._consume(
+            TokenType.END,
+            "This `while` loop is missing its closing `end`.",
+            "`end`",
+        )
+        return ast.WhileStatement(while_token.location, condition, body)
+
     def _parse_when_expression(self, when_token: Token) -> ast.WhenExpression:
         matched_expression = self._parse_expression()
         self._require_line_after_header("when expression")
         branches: list[ast.WhenBranch] = []
         self._skip_newlines()
-        pattern_column: int | None = None
 
         while not self._check(TokenType.END) and not self._is_at_end():
-            if pattern_column is None:
-                pattern_column = self._peek().location.column
-
             is_else_branch = self._match(TokenType.ELSE)
             if is_else_branch:
                 pattern = ast.ElsePattern(self._previous().location)
             else:
                 pattern = self._parse_when_pattern()
             binding_name = self._parse_when_binding()
+            self._consume(
+                TokenType.COLON,
+                "Every `when` branch header must end with `:`.",
+                "`:` after the pattern",
+            )
             self._require_line_after_header("when pattern")
             branch_body = self._parse_block_until(
-                lambda: self._starts_when_pattern_or_end(pattern_column)
+                self._starts_when_branch_or_end
             )
             if not branch_body:
                 raise ParserError(
@@ -768,11 +901,9 @@ class Parser:
             found=self._peek().describe(),
         )
 
-    def _starts_when_pattern_or_end(self, pattern_column: int) -> bool:
+    def _starts_when_branch_or_end(self) -> bool:
         if self._check(TokenType.END):
             return True
-        if self._peek().location.column != pattern_column:
-            return False
 
         single_token_patterns = {
             TokenType.ELSE,
@@ -798,6 +929,9 @@ class Parser:
                 return False
             token_index += 1
 
+        if self.tokens[token_index].token_type is not TokenType.COLON:
+            return False
+        token_index += 1
         return self.tokens[token_index].token_type is TokenType.NEWLINE
 
     def _when_struct_pattern_end(self, token_index: int) -> int:
@@ -823,17 +957,6 @@ class Parser:
 
         return token_index if not expects_identifier else self.current_index
 
-    def _parse_ignore_statement(self, ignore_token: Token) -> ast.IgnoreStatement:
-        expression = self._parse_expression()
-        if not isinstance(expression, ast.CallExpression):
-            raise ParserError(
-                expression.location,
-                "`ignore` must be followed by a function call.",
-                expected="a fallible call such as `ignore save_user!()`",
-                found=type(expression).__name__,
-            )
-        return ast.IgnoreStatement(ignore_token.location, expression)
-
     def _parse_return_statement(self, return_token: Token) -> ast.ReturnStatement:
         return_has_no_value = self._check_any(
             TokenType.NEWLINE,
@@ -856,11 +979,50 @@ class Parser:
                 found="`do` after a non-call expression",
             )
 
+        if expression.block is not None:
+            raise ParserError(
+                do_token.location,
+                "A function call can receive only one block.",
+                expected="one `&function` argument or one trailing `do` block",
+                found="both forms",
+            )
+
+        parameter_names: list[str] = []
+        if self._match(TokenType.LEFT_PARENTHESIS):
+            self._skip_newlines()
+            while not self._check(TokenType.RIGHT_PARENTHESIS):
+                parameter_token = self._consume(
+                    TokenType.IDENTIFIER,
+                    "A `do` block parameter must be a variable name.",
+                    "a snake_case parameter name",
+                )
+                validate_variable_name(parameter_token.lexeme, parameter_token.location)
+                if parameter_token.lexeme in parameter_names:
+                    raise ParserError(
+                        parameter_token.location,
+                        f"The block declares `{parameter_token.lexeme}` more than once.",
+                        expected="a unique block parameter name",
+                        found=parameter_token.lexeme,
+                    )
+                parameter_names.append(parameter_token.lexeme)
+                self._skip_newlines()
+                if not self._match(TokenType.COMMA):
+                    break
+                self._skip_newlines()
+
+            self._consume(
+                TokenType.RIGHT_PARENTHESIS,
+                "This `do` block parameter list is not closed.",
+                "`)`",
+            )
+
         self._require_line_after_header("do block")
         block_body = self._parse_block_until(lambda: self._check(TokenType.END))
         self._consume(TokenType.END, "This `do` block is missing its closing `end`.", "`end`")
-        expression.arguments.append(
-            ast.CallArgument(ast.BlockExpression(do_token.location, block_body))
+        expression.block = ast.BlockExpression(
+            do_token.location,
+            parameter_names,
+            block_body,
         )
         return expression
 
@@ -875,21 +1037,30 @@ class Parser:
 
         return statements
 
-    def _parse_expression(self) -> ast.Expression:
+    def _parse_expression(
+        self,
+        *,
+        allow_parenthesis_free_call: bool = False,
+    ) -> ast.Expression:
         # Each method below owns one precedence level. Consider ``2 + 3 * 4``:
         # ``_parse_term`` reads the ``+``, but asks ``_parse_factor`` for its
         # right-hand side. The factor method consumes ``3 * 4`` as one subtree,
         # giving the AST ``2 + (3 * 4)`` without a precedence table or backtracking.
-        return self._parse_assignment()
+        return self._parse_assignment(
+            allow_parenthesis_free_call=allow_parenthesis_free_call,
+        )
 
     def _parse_assignment(
         self,
         *,
         allow_inline_when: bool = True,
+        allow_parenthesis_free_call: bool = False,
     ) -> ast.Expression:
-        assignment_target = self._parse_range()
+        assignment_target = self._parse_or()
         if not self._match(TokenType.ASSIGN):
-            expression = self._parse_parenthesis_free_call(assignment_target)
+            expression = assignment_target
+            if allow_parenthesis_free_call:
+                expression = self._parse_parenthesis_free_call(expression)
             if allow_inline_when:
                 return self._parse_inline_when(expression)
             return expression
@@ -954,6 +1125,39 @@ class Parser:
             pattern,
             fallback_expression,
         )
+
+    def _parse_or(self) -> ast.Expression:
+        expression = self._parse_and()
+        while self._match(TokenType.OR):
+            operator = self._previous()
+            right_operand = self._parse_and()
+            expression = ast.BinaryExpression(
+                operator.location,
+                expression,
+                operator.lexeme,
+                right_operand,
+            )
+        return expression
+
+    def _parse_and(self) -> ast.Expression:
+        expression = self._parse_not()
+        while self._match(TokenType.AND):
+            operator = self._previous()
+            right_operand = self._parse_not()
+            expression = ast.BinaryExpression(
+                operator.location,
+                expression,
+                operator.lexeme,
+                right_operand,
+            )
+        return expression
+
+    def _parse_not(self) -> ast.Expression:
+        if self._match(TokenType.NOT):
+            operator = self._previous()
+            operand = self._parse_not()
+            return ast.UnaryExpression(operator.location, operator.lexeme, operand)
+        return self._parse_range()
 
     def _parse_range(self) -> ast.Expression:
         first_value = self._parse_equality()
@@ -1064,18 +1268,29 @@ class Parser:
             TokenType.LEFT_BRACKET,
             TokenType.LEFT_BRACE,
             TokenType.MINUS,
+            TokenType.NOT,
+            TokenType.TRY,
+            TokenType.IF,
             TokenType.WHEN,
         }
 
     def _parse_equality(self) -> ast.Expression:
         expression = self._parse_comparison()
-        while self._match(TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN):
+        while self._match(
+            TokenType.EQUAL,
+            TokenType.NOT_EQUAL,
+            TokenType.IN,
+            TokenType.IS,
+        ):
             operator = self._previous()
+            operator_lexeme = operator.lexeme
+            if operator.token_type is TokenType.IS and self._match(TokenType.NOT):
+                operator_lexeme = "is not"
             right_operand = self._parse_comparison()
             expression = ast.BinaryExpression(
                 operator.location,
                 expression,
-                operator.lexeme,
+                operator_lexeme,
                 right_operand,
             )
         return expression
@@ -1113,7 +1328,7 @@ class Parser:
 
     def _parse_factor(self) -> ast.Expression:
         expression = self._parse_unary()
-        while self._match(TokenType.STAR, TokenType.SLASH):
+        while self._match(TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
             operator = self._previous()
             right_operand = self._parse_unary()
             expression = ast.BinaryExpression(
@@ -1125,6 +1340,17 @@ class Parser:
         return expression
 
     def _parse_unary(self) -> ast.Expression:
+        if self._match(TokenType.TRY):
+            try_token = self._previous()
+            operand = self._parse_call_and_field_access()
+            if not isinstance(operand, ast.CallExpression):
+                raise ParserError(
+                    operand.location,
+                    "`try` must be followed by a fallible function call.",
+                    expected="a call such as `try Database.save!(record)`",
+                    found=type(operand).__name__,
+                )
+            return ast.TryExpression(try_token.location, operand)
         if self._match(TokenType.MINUS):
             operator = self._previous()
             operand = self._parse_unary()
@@ -1177,10 +1403,23 @@ class Parser:
         opening_parenthesis: Token,
     ) -> ast.CallExpression:
         arguments: list[ast.CallArgument] = []
+        block_expression: ast.Expression | None = None
         self._skip_newlines()
 
         if not self._check(TokenType.RIGHT_PARENTHESIS):
             while True:
+                if self._match(TokenType.AMPERSAND):
+                    block_expression = self._parse_expression()
+                    self._skip_newlines()
+                    if self._match(TokenType.COMMA):
+                        raise ParserError(
+                            self._previous().location,
+                            "The `&function` block argument must be final.",
+                            expected="`)` after the block argument",
+                            found="`,` after the block argument",
+                        )
+                    break
+
                 argument_name = None
                 uses_old_named_argument = (
                     self._check(TokenType.IDENTIFIER)
@@ -1219,9 +1458,17 @@ class Parser:
             "This function or struct call is missing its closing parenthesis.",
             "`)`",
         )
-        return ast.CallExpression(opening_parenthesis.location, callable_expression, arguments)
+        return ast.CallExpression(
+            opening_parenthesis.location,
+            callable_expression,
+            arguments,
+            True,
+            block_expression,
+        )
 
     def _parse_primary(self) -> ast.Expression:
+        if self._match(TokenType.IF):
+            return self._parse_if_expression(self._previous())
         if self._match(TokenType.WHEN):
             return self._parse_when_expression(self._previous())
         if self._match(TokenType.FALSE):
@@ -1332,11 +1579,11 @@ class Parser:
                     self._validate_unique_function_names(statement.else_body)
             elif isinstance(statement, ast.ForStatement):
                 self._validate_unique_function_names(statement.body)
+            elif isinstance(statement, ast.WhileStatement):
+                self._validate_unique_function_names(statement.body)
             elif isinstance(statement, ast.ExpressionStatement):
                 self._validate_functions_in_expression(statement.expression)
             elif isinstance(statement, ast.PrintStatement):
-                self._validate_functions_in_expression(statement.expression)
-            elif isinstance(statement, ast.IgnoreStatement):
                 self._validate_functions_in_expression(statement.expression)
 
     def _validate_functions_in_expression(self, expression: ast.Expression) -> None:
@@ -1355,9 +1602,18 @@ class Parser:
             self._validate_unique_function_names(expression.statements)
             return
 
+        if isinstance(expression, ast.IfExpression):
+            for branch in expression.branches:
+                self._validate_unique_function_names(branch.body)
+            if expression.else_body is not None:
+                self._validate_unique_function_names(expression.else_body)
+            return
+
         child_expressions: list[ast.Expression] = []
         if isinstance(expression, ast.UnaryExpression):
             child_expressions = [expression.operand]
+        elif isinstance(expression, ast.TryExpression):
+            child_expressions = [expression.expression]
         elif isinstance(expression, ast.BinaryExpression):
             child_expressions = [expression.left_operand, expression.right_operand]
         elif isinstance(expression, ast.AssignmentExpression):
@@ -1365,6 +1621,8 @@ class Parser:
         elif isinstance(expression, ast.CallExpression):
             child_expressions = [expression.callable_expression]
             child_expressions.extend(argument.value for argument in expression.arguments)
+            if expression.block is not None:
+                child_expressions.append(expression.block)
         elif isinstance(expression, ast.FieldAccessExpression):
             child_expressions = [expression.target]
         elif isinstance(expression, ast.IndexAccessExpression):
@@ -1431,6 +1689,23 @@ class Parser:
             return False
         self._advance()
         return True
+
+    def _match_contextual_keyword(self, keyword: str) -> bool:
+        token = self._peek()
+        if token.token_type is not TokenType.IDENTIFIER or token.lexeme != keyword:
+            return False
+        self._advance()
+        return True
+
+    def _starts_error_definition(self) -> bool:
+        token = self._peek()
+        next_token = self._peek_next()
+        return (
+            token.token_type is TokenType.IDENTIFIER
+            and token.lexeme == "error"
+            and next_token.token_type is TokenType.IDENTIFIER
+            and PASCAL_CASE_PATTERN.fullmatch(next_token.lexeme) is not None
+        )
 
     def _consume(
         self,

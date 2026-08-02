@@ -62,9 +62,13 @@ class RuntimeMap:
         if not isinstance(other, RuntimeMap) or len(self) != len(other):
             return False
 
+        from hoomer.runtime.values import runtime_values_equal
+
         for key_identity, entry in self._entries.items():
             other_entry = other._entries.get(key_identity)
-            if other_entry is None or entry.value != other_entry.value:
+            if other_entry is None:
+                return False
+            if not runtime_values_equal(entry.value, other_entry.value):
                 return False
         return True
 

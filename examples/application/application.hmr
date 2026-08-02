@@ -17,7 +17,7 @@ fn main
     )
 
     when create_result
-        Accounts.User as response
+        Accounts.User as response:
             message = Accounts.greet(
                 response,
                 greeting: "Welcome",
@@ -25,46 +25,46 @@ fn main
 
             print message
 
-        Accounts.ValidationError as response
+        Accounts.ValidationError as response:
             print "Invalid {response.field}: {response.message}"
 
-        Accounts.DatabaseError as response
+        Accounts.DatabaseError as response:
             print "Database error: {response.message}"
 
-        nil
+        nil:
             print "No user was created"
 
-        else
+        else:
             print "Unknown result"
     end
 
     find_result = Accounts.find_user!(10)
 
     when find_result
-        Accounts.User as user
+        Accounts.User as user:
             show_user(user)
 
             when user.city
-                "Guwahati"
+                "Guwahati":
                     print "User lives in Guwahati"
 
-                nil
+                nil:
                     print "City was not provided"
 
-                else
+                else:
                     print "User lives somewhere else"
             end
 
-        Accounts.ValidationError as error
+        Accounts.ValidationError as error:
             print error.message
 
-        Accounts.DatabaseError as error
+        Accounts.DatabaseError as error:
             print "Database failed with code {error.code}"
 
-        nil
+        nil:
             print "User was not found"
 
-        else
+        else:
             print "Unexpected value"
     end
 

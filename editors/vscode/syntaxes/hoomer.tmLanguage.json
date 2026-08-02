@@ -125,7 +125,7 @@
         },
         {
           "name": "meta.class.ruby",
-          "match": "\\b(struct)\\s+([A-Z][A-Za-z0-9_]*)",
+          "match": "\\b(struct|error)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "keyword.control.class.ruby"
@@ -157,7 +157,7 @@
         },
         {
           "name": "keyword.control.class.ruby",
-          "match": "\\bstruct\\b"
+          "match": "\\b(?:struct|error)\\b"
         },
         {
           "name": "keyword.control.def.ruby",
@@ -169,7 +169,7 @@
         },
         {
           "name": "keyword.control.ruby",
-          "match": "\\b(?:as|if|elsif|else|when|end|for|in)\\b"
+          "match": "\\b(?:as|if|elsif|else|when|end|for|while|in|is|and|or|not|break)\\b"
         },
         {
           "name": "keyword.control.start-block.ruby",
@@ -177,7 +177,7 @@
         },
         {
           "name": "keyword.control.pseudo-method.ruby",
-          "match": "\\b(?:return|ignore|continue)\\b"
+          "match": "\\b(?:return|try|continue)\\b"
         },
         {
           "name": "constant.language.boolean.ruby",
@@ -209,7 +209,7 @@
       "patterns": [
         {
           "name": "support.function.kernel.ruby",
-          "match": "\\b(?:print|reflect)\\b"
+          "match": "\\b(?:print|reflection(?:_(?:get|set|call|load))?)\\b"
         },
         {
           "name": "entity.name.function.ruby",

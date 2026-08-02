@@ -2,10 +2,6 @@ package Checkout
 
 import examples/checkout_showcase/hoomer/checkout_domain as Domain
 
-import text:
-    trim,
-    lowercase
-
 PAYMENT_LIMIT_CENTS = 10000
 LOYALTY_BONUS = 10
 
@@ -16,7 +12,7 @@ fn create_customer(
     premium: false,
     loyalty_points: 0,
 )
-    normalized_email = lowercase(trim(email))
+    normalized_email = email
 
     Domain.Customer(
         name: name,
@@ -84,11 +80,11 @@ end
 
 fn describe_coupon(coupon_code)
     when coupon_code
-        "HUMAN10"
+        "HUMAN10":
             "HUMAN10"
-        nil
+        nil:
             "none"
-        else as unknown_code
+        else as unknown_code:
             "{unknown_code} (unrecognized)"
     end
 end
@@ -132,10 +128,10 @@ fn divider(width)
         return ""
     end
 
-    "-" + divider(width - 1)
+    "-{divider(width - 1)}"
 end
 
-fn audit(label, block)
+fn audit(label, &block)
     print "Audit started: {label}"
     block()
     print "Audit finished: {label}"
@@ -148,22 +144,22 @@ pub fn checkout!(
     payment_limit_cents: PAYMENT_LIMIT_CENTS,
 )
     validated_order = when validate_order!(items)
-        Domain.ValidatedOrder as order
+        Domain.ValidatedOrder as order:
             order
-        Domain.ValidationError as error
+        Domain.ValidationError as error:
             return error
-        else
+        else:
             return Domain.UnexpectedCheckoutError(
                 message: "Validation returned an unknown value",
             )
     end
 
     reserved_inventory = when reserve_inventory!(validated_order)
-        Domain.InventoryReserved as reservation
+        Domain.InventoryReserved as reservation:
             reservation
-        Domain.InventoryError as error
+        Domain.InventoryError as error:
             return error
-        else
+        else:
             return Domain.UnexpectedCheckoutError(
                 message: "Inventory returned an unknown value",
             )
@@ -181,11 +177,11 @@ pub fn checkout!(
         charged_cents,
         limit_cents: payment_limit_cents,
     )
-        Domain.PaymentApproved as approval
+        Domain.PaymentApproved as approval:
             approval
-        Domain.PaymentError as error
+        Domain.PaymentError as error:
             return error
-        else
+        else:
             return Domain.UnexpectedCheckoutError(
                 message: "Payment returned an unknown value",
             )
@@ -205,31 +201,37 @@ end
 
 fn show_result(result)
     when result
-        Domain.Receipt as receipt
+        Domain.Receipt as receipt:
             print "Approved for {receipt.customer_name} ({receipt.customer_level})"
             print "Subtotal: {receipt.subtotal_cents} cents"
             print "Discount: {receipt.discount_cents} cents"
             print "Charged: {receipt.charged_cents} cents"
             print "Coupon: {describe_coupon(receipt.coupon_code)}"
-            ignore notify_warehouse!(receipt)
+            notification = notify_warehouse!(receipt)
+            when notification
+                Domain.NotificationError as error:
+                    print error.message
+                else:
+                    nil
+            end
 
-        Domain.ValidationError as error
+        Domain.ValidationError as error:
             print "Invalid order: {error.message}"
 
-        Domain.InventoryError as error
+        Domain.InventoryError as error:
             print "Not enough {error.product_name}: requested {error.requested}, available {error.available}"
 
-        Domain.PaymentError as error
+        Domain.PaymentError as error:
             print error.message
 
-        else
+        else:
             print "Unexpected checkout result"
     end
 end
 
 fn show_language_metadata(sample_product)
-    product_info = reflect(sample_product)
-    function_info = reflect(checkout!)
+    product_info = reflection(sample_product)
+    function_info = reflection(checkout!)
 
     print "Reflected struct: {product_info.name} {product_info.fields}"
     print "Reflected function: {function_info.name} {function_info.parameters}"
@@ -254,7 +256,7 @@ fn main
 
     customer = create_customer(
         "Hirak",
-        email: "  HIRAK@EXAMPLE.COM  ",
+        email: "hirak@example.com",
         premium: true,
         loyalty_points: 95,
     )

@@ -158,7 +158,7 @@ print find_name(false)
 
     def test_do_block_is_a_function_argument(self) -> None:
         _, output, _ = run_hoomer(
-            """fn run(block)
+            """fn run(&block)
     block()
 end
 
@@ -178,4 +178,11 @@ end
         rendered_error = str(caught_error.exception)
         self.assertIn("types.hmr", rendered_error)
         self.assertIn("line 1, column 15", rendered_error)
-        self.assertIn("string and number", rendered_error)
+        self.assertIn("string + number", rendered_error)
+        self.assertIn("interpolation", rendered_error)
+
+    def test_strings_cannot_be_concatenated_with_plus(self) -> None:
+        with self.assertRaises(RuntimeHoomerError) as caught_error:
+            run_hoomer('message = "Hello " + "Hirak"\n')
+
+        self.assertIn("combined with interpolation", str(caught_error.exception))

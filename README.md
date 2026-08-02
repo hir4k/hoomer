@@ -1,6 +1,6 @@
 # Hoomer Language Design Philosophy
 
-**Version:** 0.2
+**Version:** 0.3
 **Extension:** `.hmr`
 
 ## Try the interpreter
@@ -35,12 +35,15 @@ Run the test suite with:
 python3 -m unittest discover -v
 ```
 
-The MVP implements literals and interpolation, variables and constants,
-block functions, default and named parameters, structs,
-field access and assignment, packages, imports, strict boolean `if`/`elsif`,
-exhaustive and inline `when` expressions, fallible-result markers, lists, maps,
-inclusive ranges, `for` loops, `continue`, reflection, `do` blocks, source-aware
-errors, and an interactive REPL.
+The prototype implements literals and interpolation, variables and explicit
+public constants, default and named parameters, structs and error values,
+field and indexed access, packages, imports, strict boolean operators,
+`if`/`elsif`, exhaustive and inline `when` expressions, `try` propagation,
+lists, maps, inclusive ranges, `for` and `while` loops, `break` and `continue`,
+reflection, parameterized `do` closures, source-aware error traces, and a REPL.
+
+`print` and the `reflection_*` functions are available without imports because
+output and runtime metadata are essential language capabilities.
 
 ## Example programs
 
@@ -114,13 +117,13 @@ Example:
 user = find_user!(email)
 
 when user
-    User as account
+    User as account:
         print account.name
 
-    nil
+    nil:
         print "User not found"
 
-    else
+    else:
         print "Unexpected result"
 end
 ```
@@ -135,18 +138,21 @@ The code should explain itself.
 
 Hoomer should have a small number of concepts.
 
-The language provides:
+The language core provides:
 
 - Packages
 - Functions
 - Structs
 - Values
 - Pattern matching
+- Printing
 - Reflection
 - Blocks
 - Imports
 
-Everything else should be built as libraries.
+The core does not bundle convenience packages such as text helpers. Reusable
+APIs belong in independently versioned packages that will be installed by the
+Hoomer package manager.
 
 The language should not add features only because a framework needs them.
 
@@ -229,8 +235,8 @@ end
 
 Imports cross package boundaries, not file boundaries. Imports are file-scoped,
 so a sibling file must declare an external dependency when it uses that package
-directly. Private functions and structs are shared throughout their own package;
-`pub` exposes them to other packages.
+directly. Private functions, structs, errors, and constants are shared throughout
+their own package; `pub` exposes them to other packages.
 
 The directory containing `hoomer.toml` is the project root. Its snake_case
 directory name begins every project-local import path. In the example above,
@@ -238,7 +244,8 @@ directory name begins every project-local import path. In the example above,
 Paths are unquoted because static imports are declarations, not runtime strings.
 An import whose first segment is not the project root is resolved as an external
 package from the interpreter's package search paths. The package manager will
-eventually populate those paths from the project's locked dependencies.
+eventually populate those paths from the project's locked dependencies. Hoomer
+does not reserve import paths for bundled convenience packages.
 
 Package loading is inert. Package scope accepts imports, inert constants,
 structs, and functions, but rejects printing, ordinary assignments, calls,
@@ -255,6 +262,7 @@ loads successfully without output.
 
 ```hmr
 package Greeting
+
 
 fn main
     print "Hello"
@@ -473,9 +481,11 @@ Hoomer does not use exceptions.
 Example:
 
 ```hmr
-DatabaseError(
-    message: "Connection failed",
-)
+error DatabaseError
+    message,
+end
+
+failure = DatabaseError(message: "Connection failed")
 ```
 
 A function may return:
@@ -501,7 +511,7 @@ Example:
 save_user!
 ```
 
-The symbol is a communication and tooling contract.
+The symbol is an enforced communication and tooling contract.
 
 It tells the reader:
 
@@ -517,24 +527,34 @@ The programmer can handle the result:
 
 ```hmr
 when result
-    User as user
+    User as user:
         print user.name
 
-    DatabaseError as error
+    DatabaseError as error:
         print error.message
 
-    else
+    else:
         print "Unexpected result"
 end
 ```
 
-Errors remain ordinary structs. Hoomer has no exception, throwing, or special
-failure channel. A fallible result may be matched immediately, stored, or
-returned. Discarding one must be explicit:
+An ordinary call returns its success value or its error value unchanged. A
+fallible function can use `try` when it only wants to handle success:
 
 ```hmr
-ignore save_user!(user)
+fn load_profile!()
+    user = try load_user!()
+    try load_preferences!(user)
+end
 ```
+
+If the called function produces an error, `try` immediately returns that same
+error from the current `!` function. It does not terminate the process. Without
+`try`, the caller can store or match the raw result. A fallible result cannot be
+silently discarded.
+
+Error values retain compact creation and propagation frames for diagnostics and
+tooling. `print error` displays the error value.
 
 ---
 
@@ -561,6 +581,15 @@ end
 Conditions accept only `true` or `false`. Numbers, strings, lists, maps, and
 `nil` are not implicitly truthy or falsey.
 
+`and` and `or` short-circuit, and `not` negates a boolean. Exact runtime type
+checks use `is` and `is not`:
+
+```hmr
+if value is User and value.active
+    print value.name
+end
+```
+
 ---
 
 # 14. Pattern Matching
@@ -571,16 +600,16 @@ Example:
 
 ```hmr
 when result
-    User as user
+    User as user:
         print user.name
 
-    DatabaseError as error
+    DatabaseError as error:
         print error.message
 
-    nil
+    nil:
         print "Nothing found"
 
-    else as unexpected
+    else as unexpected:
         print "Unknown: {unexpected}"
 end
 ```
@@ -593,12 +622,12 @@ the unmatched value is needed inside that branch.
 
 ```hmr
 database = when connect_database!()
-    DatabaseConnection as connection
+    DatabaseConnection as connection:
         connection
-    DatabaseConnectionFailure as error
+    DatabaseConnectionFailure as error:
         print error.message
         nil
-    else
+    else:
         nil
 end
 ```
@@ -640,9 +669,9 @@ Hoomer prefers:
 
 ```hmr
 when result
-    User as user
+    User as user:
         print user.name
-    else
+    else:
         nil
 end
 ```
@@ -686,9 +715,23 @@ parameters appear before named defaults. Calls use the same `name: value`
 spelling as struct construction. `=` remains assignment rather than carrying a
 second meaning inside calls.
 
-Ordinary calls may omit parentheses when the call stays unambiguous on one
-line—`greet "Hirak"` and `greet("Hirak")` are equivalent. Struct construction
-always requires parentheses.
+An ordinary call may omit parentheses only when the entire statement is that
+call—`greet "Hirak"` and `greet("Hirak")` are equivalent as standalone lines.
+Nested calls, assigned calls, returned calls, and struct construction require
+parentheses. This keeps expression boundaries visible.
+
+Multiple positional and named arguments use commas in the same order as a
+parenthesized call:
+
+```hmr
+some_function arg1, arg2, keywordarg: value
+```
+
+Strings are combined through interpolation, never with `+`:
+
+```hmr
+message = "Hello {name}"
+```
 
 A parameterless block function may omit its empty parameter list. This keeps
 declarative APIs, such as a migration library, focused on their domain:
@@ -782,9 +825,8 @@ Imports remain file-scoped. Same-package declarations need no import, while
 every file using an external package declares that dependency itself:
 
 ```hmr
-import text:
-    trim,
-    lowercase
+import validation:
+    validate_email
 ```
 
 Imports are explicit.
@@ -798,14 +840,30 @@ Blocks allow libraries to create readable APIs.
 Example:
 
 ```hmr
-Database.transaction() do
-
-    save_user(user)
-
+Database.transaction() do(transaction)
+    transaction.save(user)
 end
 ```
 
-A block is simply a function passed as an argument.
+A block is a closure supplied to a function's final `&` parameter:
+
+```hmr
+fn visit(users, &action)
+    for user in users
+        action(user)
+    end
+end
+
+visit(users) do(user)
+    print user.name
+end
+
+visit(users, &show_user)
+```
+
+The block can read and update variables from its surrounding lexical scope.
+The same API accepts either an inline `do(...) ... end` block or an existing
+function passed with `&name`.
 
 The language does not need special syntax for:
 
@@ -820,9 +878,10 @@ Libraries build these.
 
 # 20. Collections and Loops
 
-List literals are comma-separated and may span lines. Inclusive integer ranges
-use `first..last`; they count up or down depending on the bounds. `for` visits
-each item, and `continue` skips directly to the next one.
+List literals are comma-separated and may span lines. Lists support indexed
+reads and assignments. Inclusive integer ranges use `first..last`; they count
+up or down depending on the bounds. `for` visits each item, and `continue`
+skips directly to the next one.
 
 ```hmr
 users = [
@@ -878,6 +937,9 @@ if "city" in user
 end
 ```
 
+It also checks values in lists and ranges and substrings in strings. `while`
+repeats while its condition is exactly `true`; `break` exits the nearest loop.
+
 A map loop can visit keys alone or bind each key and value:
 
 ```hmr
@@ -906,7 +968,7 @@ Programs can inspect:
 Example:
 
 ```hmr
-info = reflect(user)
+info = reflection(user)
 
 print info.fields
 ```
@@ -916,7 +978,7 @@ Package reflection separates the declared name from its runtime import identity:
 ```hmr
 import kenekoi/accounts
 
-info = reflect(Accounts)
+info = reflection(Accounts)
 print info.name # Accounts
 print info.path # kenekoi/accounts
 ```
@@ -928,6 +990,11 @@ Reflection enables:
 - Frameworks
 - Developer tools
 
+Frameworks that genuinely need dynamic behavior can use `reflection_load`,
+`reflection_get`, `reflection_set`, and `reflection_call`. Static `import` and
+direct calls remain the normal, clearer choice for application code. Use
+`reflection(value)` for ordinary inspection.
+
 ---
 
 # 22. Constants
@@ -937,11 +1004,12 @@ Constants use UPPER_SNAKE_CASE.
 Example:
 
 ```hmr
-MAX_CONNECTIONS = 100
+pub MAX_CONNECTIONS = 100
 DEFAULT_TIMEOUT = 30
 ```
 
-Constants are immutable.
+Constants are immutable. A package constant is private unless its declaration
+starts with `pub`.
 
 ---
 
@@ -963,9 +1031,7 @@ Example:
 
 ```hmr
 struct Counter
-
-    value = 0
-
+    value: 0,
 end
 ```
 
@@ -992,11 +1058,11 @@ while avoiding:
 
 ---
 
-# 25. MVP Interpreter
+# 25. Prototype Interpreter
 
-The first implementation will be written in Python.
+The first implementation is written in Python.
 
-The MVP will include:
+The prototype includes:
 
 1. Lexer
 2. Parser

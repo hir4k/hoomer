@@ -16,7 +16,6 @@ class RuntimePackage:
         environment: Environment,
         *,
         source_directory: Path | None = None,
-        is_builtin: bool = False,
     ) -> None:
         self.name = name
         self.import_path = import_path
@@ -24,7 +23,6 @@ class RuntimePackage:
         self.source_directory = source_directory
         self.member_names: set[str] = set()
         self.public_member_names: set[str] = set()
-        self.is_builtin = is_builtin
 
     def register_member(self, member_name: str) -> None:
         """Make a declaration addressable throughout this package."""
@@ -97,9 +95,6 @@ class PackageRegistry:
         elif source_directory is not None:
             package.source_directory = source_directory
         return package
-
-    def register_builtin(self, package: RuntimePackage) -> None:
-        self.packages_by_import_path[package.import_path] = package
 
     def discard(self, import_path: str) -> None:
         """Forget a package whose declarations failed to finish loading."""

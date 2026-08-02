@@ -11,14 +11,14 @@ pub struct Query
     statement,
 end
 
-pub struct ModelMismatchError
+pub error ModelMismatchError
     table,
     expected_model,
     received_model,
 end
 
 pub fn model(sample_record, table:)
-    record_info = reflect(sample_record)
+    record_info = reflection(sample_record)
 
     Model(
         name: record_info.name,
@@ -33,7 +33,7 @@ pub fn migrate(model)
 end
 
 pub fn create!(model, record)
-    record_info = reflect(record)
+    record_info = reflection(record)
 
     if record_info.name != model.name
         return ModelMismatchError(
@@ -72,7 +72,7 @@ pub fn execute(query)
     print query.statement
 end
 
-pub fn transaction(block)
+pub fn transaction(&block)
     print "BEGIN"
     block()
     print "COMMIT"

@@ -1,4 +1,4 @@
-"""Basic reflection values exposed through Hoomer's built-in ``reflect``."""
+"""Runtime metadata exposed through Hoomer's built-in ``reflection`` function."""
 
 from __future__ import annotations
 
@@ -6,10 +6,12 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 from hoomer.errors import RuntimeHoomerError, SourceLocation
-from hoomer.runtime.functions import NativeFunction, RuntimeFunction
+from hoomer.runtime.functions import BuiltinFunction, RuntimeBlock, RuntimeFunction
 from hoomer.runtime.packages import RuntimePackage
 from hoomer.runtime.structs import RuntimeStructDefinition, RuntimeStructInstance
 from hoomer.runtime.values import runtime_type_name
+from hoomer.runtime.types import type_of
+from hoomer.runtime.types import RuntimeType
 
 
 @dataclass(slots=True)
@@ -37,6 +39,9 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
                 [
                     ("name", value.definition.name),
                     ("fields", list(value.fields)),
+                    ("values", _field_values(value)),
+                    ("is_error", value.is_error),
+                    ("type", value.definition),
                 ]
             ),
         )
@@ -48,6 +53,19 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
                 [
                     ("name", value.name),
                     ("fields", [field.name for field in value.fields]),
+                    ("is_error", value.is_error),
+                    ("type", value),
+                ]
+            ),
+        )
+
+    if isinstance(value, RuntimeType):
+        return ReflectionValue(
+            "TypeInfo",
+            OrderedDict(
+                [
+                    ("name", value.name),
+                    ("kind", "primitive"),
                 ]
             ),
         )
@@ -55,10 +73,22 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
     if isinstance(value, RuntimeFunction):
         return _reflect_function(value)
 
-    if isinstance(value, NativeFunction):
+    if isinstance(value, BuiltinFunction):
         return ReflectionValue(
             "FunctionInfo",
             OrderedDict([("name", value.name), ("parameters", value.parameter_names)]),
+        )
+
+    if isinstance(value, RuntimeBlock):
+        return ReflectionValue(
+            "FunctionInfo",
+            OrderedDict(
+                [
+                    ("name", value.name),
+                    ("parameters", value.parameter_names),
+                    ("is_fallible", False),
+                ]
+            ),
         )
 
     if isinstance(value, RuntimePackage):
@@ -69,12 +99,22 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
         function_names = [
             name
             for name, member in package_values
-            if isinstance(member, (RuntimeFunction, NativeFunction))
+            if isinstance(member, (RuntimeFunction, BuiltinFunction))
         ]
         struct_names = [
             name
             for name, member in package_values
-            if isinstance(member, RuntimeStructDefinition)
+            if isinstance(member, RuntimeStructDefinition) and not member.is_error
+        ]
+        error_names = [
+            name
+            for name, member in package_values
+            if isinstance(member, RuntimeStructDefinition) and member.is_error
+        ]
+        constant_names = [
+            name
+            for name, member in package_values
+            if name.isupper()
         ]
         return ReflectionValue(
             "PackageInfo",
@@ -84,13 +124,22 @@ def reflect_runtime_value(value: object) -> ReflectionValue:
                     ("path", value.import_path),
                     ("functions", function_names),
                     ("structs", struct_names),
+                    ("errors", error_names),
+                    ("constants", constant_names),
+                    ("members", sorted(value.public_member_names)),
                 ]
             ),
         )
 
     return ReflectionValue(
         "ValueInfo",
-        OrderedDict([("name", runtime_type_name(value)), ("fields", [])]),
+        OrderedDict(
+            [
+                ("name", runtime_type_name(value)),
+                ("fields", []),
+                ("type", type_of(value)),
+            ]
+        ),
     )
 
 
@@ -101,6 +150,17 @@ def _reflect_function(function: RuntimeFunction) -> ReflectionValue:
             [
                 ("name", function.name),
                 ("parameters", function.parameter_names),
+                ("is_fallible", function.is_fallible),
             ]
         ),
     )
+
+
+def _field_values(value: RuntimeStructInstance) -> RuntimeMap:
+    from hoomer.runtime.maps import RuntimeMap
+
+    field_values = RuntimeMap()
+    internal_location = SourceLocation("<reflection>", 1, 1)
+    for field_name, field_value in value.fields.items():
+        field_values.set(field_name, field_value, internal_location)
+    return field_values
