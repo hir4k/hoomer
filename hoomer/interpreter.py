@@ -1397,16 +1397,6 @@ class Interpreter:
         environment: Environment,
         callable_value: object,
     ) -> object:
-        if (
-            not expression.uses_parentheses
-            and isinstance(callable_value, RuntimeStructDefinition)
-        ):
-            raise RuntimeHoomerError(
-                expression.location,
-                f"Struct `{callable_value.name}` construction always requires parentheses.",
-                expected=f"`{callable_value.name}(field_name: value)`",
-                found="a parenthesis-free struct call",
-            )
         positional_arguments: list[object] = []
         named_arguments: dict[str, object] = {}
         encountered_named_argument = False

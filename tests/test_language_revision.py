@@ -244,7 +244,7 @@ print(message)
             self.assertEqual(output, "After\nHello Hirak\n")
 
     def test_print_is_part_of_the_language_core(self) -> None:
-        _, output, _ = run_hoomer('print "available without an import"\n')
+        _, output, _ = run_hoomer('print("available without an import")\n')
 
         self.assertEqual(output, "available without an import\n")
 

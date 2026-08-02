@@ -55,7 +55,7 @@ def runtime_type_name(value: object) -> str:
 def format_runtime_value(value: object, *, nested: bool = False) -> str:
     """Render a runtime value using Hoomer spellings.
 
-    Strings print without quotes at the top level so ``print "Hello"`` produces
+    Strings print without quotes at the top level so ``print("Hello")`` produces
     ``Hello``. Nested strings keep quotes to make composite values unambiguous:
     ``User(name: "Hirak")`` is easier to read than ``User(name: Hirak)``.
     """

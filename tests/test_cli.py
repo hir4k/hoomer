@@ -52,7 +52,7 @@ class CliTests(unittest.TestCase):
             package_directory.mkdir()
             source_path = package_directory / "main.hmr"
             source_path.write_text(
-                "package Hello\n\nfn main\n    print \"hello\"\nend\n",
+                "package Hello\n\nfn main\n    print(\"hello\")\nend\n",
                 encoding="utf-8",
             )
             standard_output = io.StringIO()
@@ -74,7 +74,7 @@ class CliTests(unittest.TestCase):
             package_directory = Path(temporary_directory) / "hello"
             package_directory.mkdir()
             (package_directory / "main.hmr").write_text(
-                "package Hello\n\nfn main\n    print \"hello\"\nend\n",
+                "package Hello\n\nfn main\n    print(\"hello\")\nend\n",
                 encoding="utf-8",
             )
             standard_output = io.StringIO()
@@ -91,4 +91,4 @@ class CliTests(unittest.TestCase):
         self.assertTrue(_source_needs_more_lines("users = [\n"))
         self.assertTrue(_source_needs_more_lines("for user in users\n"))
         self.assertFalse(_source_needs_more_lines("fn greet(name)\nend\n"))
-        self.assertFalse(_source_needs_more_lines('print "end"\n'))
+        self.assertFalse(_source_needs_more_lines('print("end")\n'))

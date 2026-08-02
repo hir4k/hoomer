@@ -5,7 +5,7 @@ fn print_fibonacci(remaining, current: 0, next: 1)
         return
     end
 
-    print current
+    print(current)
     print_fibonacci(
         remaining - 1,
         current: next,

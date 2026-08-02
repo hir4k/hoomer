@@ -38,13 +38,13 @@ fn print_primes(number, limit)
     end
 
     if is_prime(number)
-        print number
+        print(number)
     end
 
     print_primes(number + 1, limit)
 end
 
 fn main
-    print "Prime numbers up to 50:"
+    print("Prime numbers up to 50:")
     print_primes(2, 50)
 end

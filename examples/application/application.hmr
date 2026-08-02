@@ -3,10 +3,10 @@ package Application
 import examples/accounts
 
 pub fn show_user(user)
-    print "ID: {user.id}"
-    print "Name: {user.name}"
-    print "Email: {user.email}"
-    print "Age: {user.age}"
+    print("ID: {user.id}")
+    print("Name: {user.name}")
+    print("Email: {user.email}")
+    print("Age: {user.age}")
 end
 
 fn main
@@ -23,19 +23,19 @@ fn main
                 greeting: "Welcome",
             )
 
-            print message
+            print(message)
 
         Accounts.ValidationError as response:
-            print "Invalid {response.field}: {response.message}"
+            print("Invalid {response.field}: {response.message}")
 
         Accounts.DatabaseError as response:
-            print "Database error: {response.message}"
+            print("Database error: {response.message}")
 
         nil:
-            print "No user was created"
+            print("No user was created")
 
         else:
-            print "Unknown result"
+            print("Unknown result")
     end
 
     find_result = Accounts.find_user!(10)
@@ -46,26 +46,26 @@ fn main
 
             when user.city
                 "Guwahati":
-                    print "User lives in Guwahati"
+                    print("User lives in Guwahati")
 
                 nil:
-                    print "City was not provided"
+                    print("City was not provided")
 
                 else:
-                    print "User lives somewhere else"
+                    print("User lives somewhere else")
             end
 
         Accounts.ValidationError as error:
-            print error.message
+            print(error.message)
 
         Accounts.DatabaseError as error:
-            print "Database failed with code {error.code}"
+            print("Database failed with code {error.code}")
 
         nil:
-            print "User was not found"
+            print("User was not found")
 
         else:
-            print "Unexpected value"
+            print("Unexpected value")
     end
 
     users = [
@@ -87,6 +87,6 @@ fn main
             continue
         end
 
-        print Accounts.greet(user)
+        print(Accounts.greet(user))
     end
 end

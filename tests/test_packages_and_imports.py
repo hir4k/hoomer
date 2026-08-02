@@ -29,7 +29,7 @@ end
                 package_search_paths=[package_root]
             )
             interpreter.execute_source(
-                "import std/io\nprint IO.message()\n"
+                "import std/io\nprint(IO.message())\n"
             )
 
         loaded_io = interpreter.package_registry.get("std/io")
@@ -69,8 +69,8 @@ end
         )
 
         interpreter.execute_source(
-            "import accounts\nprint Accounts.login()\n"
-            "print Accounts.logout()\n"
+            "import accounts\nprint(Accounts.login())\n"
+            "print(Accounts.logout())\n"
         )
 
         self.assertEqual(output.getvalue(), "logged in\nlogged out\n")
@@ -97,7 +97,7 @@ fn login(name)
 end
 
 fn main
-    print login("Hirak")
+    print(login("Hirak"))
 end
 """,
                 encoding="utf-8",
@@ -141,7 +141,7 @@ end
 
 
 fn main
-    print normalize("unavailable here")
+    print(normalize("unavailable here"))
 end
 """,
                 encoding="utf-8",
@@ -170,7 +170,7 @@ end
             )
             (application_directory / "main.hmr").write_text(
                 "package Application\n\nfn main\n"
-                "    print Accounts.name()\nend\n",
+                "    print(Accounts.name())\nend\n",
                 encoding="utf-8",
             )
 
@@ -203,7 +203,7 @@ import accounts as TeacherAccount
 
 fn main
     teacher = TeacherAccount.Teacher(name: "Hirak")
-    print teacher.name
+    print(teacher.name)
 end
 """,
                 encoding="utf-8",
@@ -245,8 +245,8 @@ import accounts as InstalledAccounts
 import kenekoi/accounts as ProjectAccounts
 
 fn main
-    print InstalledAccounts.source()
-    print ProjectAccounts.source()
+    print(InstalledAccounts.source())
+    print(ProjectAccounts.source())
 end
 """,
                 encoding="utf-8",
@@ -282,7 +282,7 @@ end
 import kenekoi/accounts
 
 fn main
-    print Accounts.greeting()
+    print(Accounts.greeting())
 end
 """,
                 encoding="utf-8",
@@ -340,10 +340,10 @@ end
         interpreter.execute_source(
             """import accounts
 package_info = reflection(Accounts)
-print package_info.name
-print package_info.path
-print package_info.functions
-print package_info.structs
+print(package_info.name)
+print(package_info.path)
+print(package_info.functions)
+print(package_info.structs)
 """
         )
 
@@ -365,8 +365,8 @@ pub SUPPORTED_PORTS = [3000, 3001]
 
         interpreter.execute_source(
             "import accounts\n"
-            "print Accounts.MAX_LOGIN_ATTEMPTS\n"
-            "print Accounts.SUPPORTED_PORTS\n"
+            "print(Accounts.MAX_LOGIN_ATTEMPTS)\n"
+            "print(Accounts.SUPPORTED_PORTS)\n"
         )
 
         self.assertEqual(output.getvalue(), "5\n[3000, 3001]\n")
@@ -376,7 +376,7 @@ pub SUPPORTED_PORTS = [3000, 3001]
             run_hoomer(
                 """package Accounts
 
-print "loading"
+print("loading")
 """,
                 file_name="accounts.hmr",
             )
@@ -469,7 +469,7 @@ DATABASE = connect()
             package_directory = Path(temporary_directory) / "application"
             package_directory.mkdir()
             (package_directory / "main.hmr").write_text(
-                "package Application\n\nfn main(name)\n    print name\nend\n",
+                "package Application\n\nfn main(name)\n    print(name)\nend\n",
                 encoding="utf-8",
             )
 

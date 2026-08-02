@@ -118,13 +118,13 @@ user = find_user!(email)
 
 when user
     User as account:
-        print account.name
+        print(account.name)
 
     nil:
-        print "User not found"
+        print("User not found")
 
     else:
-        print "Unexpected result"
+        print("Unexpected result")
 end
 ```
 
@@ -265,7 +265,7 @@ package Greeting
 
 
 fn main
-    print "Hello"
+    print("Hello")
 end
 ```
 
@@ -528,13 +528,13 @@ The programmer can handle the result:
 ```hmr
 when result
     User as user:
-        print user.name
+        print(user.name)
 
     DatabaseError as error:
-        print error.message
+        print(error.message)
 
     else:
-        print "Unexpected result"
+        print("Unexpected result")
 end
 ```
 
@@ -554,7 +554,7 @@ error from the current `!` function. It does not terminate the process. Without
 silently discarded.
 
 Error values retain compact creation and propagation frames for diagnostics and
-tooling. `print error` displays the error value.
+tooling. `print(error)` displays the error value.
 
 ---
 
@@ -574,7 +574,7 @@ Usage:
 
 ```hmr
 if is_active(user)
-    print "Active"
+    print("Active")
 end
 ```
 
@@ -586,7 +586,7 @@ checks use `is` and `is not`:
 
 ```hmr
 if value is User and value.active
-    print value.name
+    print(value.name)
 end
 ```
 
@@ -601,16 +601,16 @@ Example:
 ```hmr
 when result
     User as user:
-        print user.name
+        print(user.name)
 
     DatabaseError as error:
-        print error.message
+        print(error.message)
 
     nil:
-        print "Nothing found"
+        print("Nothing found")
 
     else as unexpected:
-        print "Unknown: {unexpected}"
+        print("Unknown: {unexpected}")
 end
 ```
 
@@ -625,7 +625,7 @@ database = when connect_database!()
     DatabaseConnection as connection:
         connection
     DatabaseConnectionFailure as error:
-        print error.message
+        print(error.message)
         nil
     else:
         nil
@@ -670,7 +670,7 @@ Hoomer prefers:
 ```hmr
 when result
     User as user:
-        print user.name
+        print(user.name)
     else:
         nil
 end
@@ -715,16 +715,15 @@ parameters appear before named defaults. Calls use the same `name: value`
 spelling as struct construction. `=` remains assignment rather than carrying a
 second meaning inside calls.
 
-An ordinary call may omit parentheses only when the entire statement is that
-call—`greet "Hirak"` and `greet("Hirak")` are equivalent as standalone lines.
-Nested calls, assigned calls, returned calls, and struct construction require
-parentheses. This keeps expression boundaries visible.
+Every function and struct call uses parentheses, including a call that occupies
+an entire statement. Write `greet("Hirak")`, never `greet "Hirak"`. One rule at
+every call site keeps expression boundaries visible.
 
 Multiple positional and named arguments use commas in the same order as a
 parenthesized call:
 
 ```hmr
-some_function arg1, arg2, keywordarg: value
+some_function(arg1, arg2, keywordarg: value)
 ```
 
 Strings are combined through interpolation, never with `+`:
@@ -738,9 +737,9 @@ declarative APIs, such as a migration library, focused on their domain:
 
 ```hmr
 fn change
-    field "name", "string"
-    field "username", "string"
-    field "age", "int"
+    field("name", "string")
+    field("username", "string")
+    field("age", "int")
 end
 ```
 
@@ -855,7 +854,7 @@ fn visit(users, &action)
 end
 
 visit(users) do(user)
-    print user.name
+    print(user.name)
 end
 
 visit(users, &show_user)
@@ -894,7 +893,7 @@ for user in users
         continue
     end
 
-    print user.name
+    print(user.name)
 end
 ```
 
@@ -902,7 +901,7 @@ Use a range when the loop visits consecutive whole numbers:
 
 ```hmr
 for number in 0..10
-    print number
+    print(number)
 end
 ```
 
@@ -917,8 +916,8 @@ user = {
     field_name: "hirak@example.com",
 }
 
-print user["name"]
-print user["city"] # nil
+print(user["name"])
+print(user["city"]) # nil
 
 user["city"] = "Guwahati"
 ```
@@ -933,7 +932,7 @@ entry unreachable.
 
 ```hmr
 if "city" in user
-    print "A city was provided"
+    print("A city was provided")
 end
 ```
 
@@ -944,11 +943,11 @@ A map loop can visit keys alone or bind each key and value:
 
 ```hmr
 for key in user
-    print key
+    print(key)
 end
 
 for key, value in user
-    print "{key}: {value}"
+    print("{key}: {value}")
 end
 ```
 
@@ -970,7 +969,7 @@ Example:
 ```hmr
 info = reflection(user)
 
-print info.fields
+print(info.fields)
 ```
 
 Package reflection separates the declared name from its runtime import identity:
@@ -979,8 +978,8 @@ Package reflection separates the declared name from its runtime import identity:
 import kenekoi/accounts
 
 info = reflection(Accounts)
-print info.name # Accounts
-print info.path # kenekoi/accounts
+print(info.name) # Accounts
+print(info.path) # kenekoi/accounts
 ```
 
 Reflection enables:

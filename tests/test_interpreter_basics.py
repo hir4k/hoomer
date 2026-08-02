@@ -13,11 +13,11 @@ class InterpreterBasicsTests(unittest.TestCase):
 score = 5 + 3 * 2
 
 if score > 20
-    print "too high"
+    print("too high")
 elsif score == 11
-    print "Hello {name}, score: {score}"
+    print("Hello {name}, score: {score}")
 else
-    print "too low"
+    print("too low")
 end
 """
         )
@@ -34,9 +34,9 @@ end
     "Hello, {name}"
 end
 
-print greet()
-print greet(name: "Hirak")
-print greet(name: "")
+print(greet())
+print(greet(name: "Hirak"))
+print(greet(name: ""))
 """
         )
 
@@ -48,7 +48,7 @@ print greet(name: "")
     42
 end
 
-print answer()
+print(answer())
 """
         )
 
@@ -62,7 +62,7 @@ print answer()
 end
 
 if user_age()
-    print "adult"
+    print("adult")
 end
 """
             )
@@ -106,8 +106,8 @@ end
     end
 end
 
-print find_name(true)
-print find_name(false)
+print(find_name(true))
+print(find_name(false))
 """
         )
 
@@ -123,8 +123,8 @@ print find_name(false)
     end
 end
 
-print label(true)
-print label(false)
+print(label(true))
+print(label(false))
 """
         )
 
@@ -140,8 +140,8 @@ print label(false)
     end
 end
 
-print find_name(true)
-print find_name(false)
+print(find_name(true))
+print(find_name(false))
 """
         )
 
@@ -163,7 +163,7 @@ print find_name(false)
 end
 
 run() do
-    print "inside block"
+    print("inside block")
 end
 """
         )

@@ -9,5 +9,5 @@ fn main
     )
 
     message = Example.greet(user, from: "Baruapara")
-    print message
+    print(message)
 end

@@ -36,7 +36,7 @@ fn print_fizzbuzz(number, limit)
         return
     end
 
-    print fizzbuzz_value(number)
+    print(fizzbuzz_value(number))
     print_fizzbuzz(number + 1, limit)
 end
 

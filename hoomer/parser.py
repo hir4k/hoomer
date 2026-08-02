@@ -115,10 +115,42 @@ class Parser:
         )
         if is_print_statement:
             print_token = self._advance()
+            self._consume(
+                TokenType.LEFT_PARENTHESIS,
+                "`print` requires parentheses around its value.",
+                "`print(value)`",
+            )
+            self._skip_newlines()
             value_to_print = self._parse_expression()
+            self._skip_newlines()
+            self._consume(
+                TokenType.RIGHT_PARENTHESIS,
+                "This `print` call is missing its closing parenthesis.",
+                "`)`",
+            )
             return ast.PrintStatement(print_token.location, value_to_print)
 
-        expression = self._parse_expression(allow_parenthesis_free_call=True)
+        expression = self._parse_expression()
+
+        has_unparsed_arguments = not self._check_any(
+            TokenType.DO,
+            TokenType.NEWLINE,
+            TokenType.END_OF_FILE,
+            TokenType.END,
+            TokenType.ELSIF,
+            TokenType.ELSE,
+        )
+        is_callable_expression = isinstance(
+            expression,
+            (ast.VariableExpression, ast.FieldAccessExpression),
+        )
+        if is_callable_expression and has_unparsed_arguments:
+            raise ParserError(
+                self._peek().location,
+                "Function and struct calls require parentheses around their arguments.",
+                expected="a call such as `function_name(value)`",
+                found="arguments without an opening `(`",
+            )
 
         if self._match(TokenType.DO):
             expression = self._attach_do_block(expression, self._previous())
@@ -464,7 +496,7 @@ class Parser:
         * ``struct User ... end`` describes data.
         * ``fn find_user() ... end`` describes behavior for later use.
 
-        In contrast, ``user = User()`` creates runtime state and ``print user``
+        In contrast, ``user = User()`` creates runtime state and ``print(user)``
         performs I/O. Rejecting the whole file during parsing prevents earlier
         definitions from being installed before the invalid action is found.
         """
@@ -1037,33 +1069,17 @@ class Parser:
 
         return statements
 
-    def _parse_expression(
-        self,
-        *,
-        allow_parenthesis_free_call: bool = False,
-    ) -> ast.Expression:
+    def _parse_expression(self) -> ast.Expression:
         # Each method below owns one precedence level. Consider ``2 + 3 * 4``:
         # ``_parse_term`` reads the ``+``, but asks ``_parse_factor`` for its
         # right-hand side. The factor method consumes ``3 * 4`` as one subtree,
         # giving the AST ``2 + (3 * 4)`` without a precedence table or backtracking.
-        return self._parse_assignment(
-            allow_parenthesis_free_call=allow_parenthesis_free_call,
-        )
+        return self._parse_assignment()
 
-    def _parse_assignment(
-        self,
-        *,
-        allow_inline_when: bool = True,
-        allow_parenthesis_free_call: bool = False,
-    ) -> ast.Expression:
+    def _parse_assignment(self) -> ast.Expression:
         assignment_target = self._parse_or()
         if not self._match(TokenType.ASSIGN):
-            expression = assignment_target
-            if allow_parenthesis_free_call:
-                expression = self._parse_parenthesis_free_call(expression)
-            if allow_inline_when:
-                return self._parse_inline_when(expression)
-            return expression
+            return self._parse_inline_when(assignment_target)
 
         assignment_operator = self._previous()
         assigned_value = self._parse_assignment()
@@ -1171,108 +1187,6 @@ class Parser:
             first_value,
             last_value,
         )
-
-    def _parse_parenthesis_free_call(
-        self,
-        callable_expression: ast.Expression,
-    ) -> ast.Expression:
-        """Parse an unambiguous same-line call such as ``greet "Hirak"``.
-
-        The call must contain at least one argument; ``greet`` alone remains a
-        reference to the function value. Arguments cannot continue after a
-        newline without parentheses. These two constraints keep variables and
-        the next statement from being silently consumed as part of a call.
-        """
-
-        if not isinstance(
-            callable_expression,
-            (ast.VariableExpression, ast.FieldAccessExpression),
-        ):
-            return callable_expression
-        if self._check(TokenType.WHEN):
-            # ``result when User`` is an inline pattern filter, not a call to
-            # ``result`` with a block ``when`` expression as its argument.
-            # A full ``when`` passed as an argument remains available through
-            # an explicit parenthesized call.
-            return callable_expression
-        if not self._token_can_start_expression(self._peek()):
-            return callable_expression
-
-        arguments: list[ast.CallArgument] = []
-        encountered_named_argument = False
-        while True:
-            argument_name = None
-            uses_old_named_argument = (
-                self._check(TokenType.IDENTIFIER)
-                and self._peek_next().token_type is TokenType.ASSIGN
-            )
-            if uses_old_named_argument:
-                argument_token = self._peek()
-                raise ParserError(
-                    self._peek_next().location,
-                    "Named arguments use `:`.",
-                    expected=f"`{argument_token.lexeme}: value`",
-                    found=f"`{argument_token.lexeme}=value`",
-                )
-
-            begins_named_argument = (
-                self._check(TokenType.IDENTIFIER)
-                and self._peek_next().token_type is TokenType.COLON
-            )
-            if begins_named_argument:
-                argument_token = self._advance()
-                argument_name = argument_token.lexeme
-                validate_variable_name(argument_name, argument_token.location)
-                self._advance()  # The lookahead above already proved this is `:`.
-                encountered_named_argument = True
-            elif encountered_named_argument:
-                raise ParserError(
-                    self._peek().location,
-                    "A positional argument cannot follow a named argument.",
-                    expected="all positional arguments before named arguments",
-                    found=self._peek().describe(),
-                )
-
-            # Leave a trailing ``when Pattern`` for the complete call. Without
-            # this boundary, ``find_user! 10 when User`` would filter the
-            # argument ``10`` instead of the result of ``find_user! 10``.
-            argument_value = self._parse_assignment(allow_inline_when=False)
-            arguments.append(ast.CallArgument(argument_value, argument_name))
-            if not self._match(TokenType.COMMA):
-                break
-            if not self._token_can_start_expression(self._peek()):
-                raise ParserError(
-                    self._peek().location,
-                    "A parenthesis-free call cannot continue onto another line.",
-                    expected="another argument on the same line",
-                    found=self._peek().describe(),
-                )
-
-        return ast.CallExpression(
-            callable_expression.location,
-            callable_expression,
-            arguments,
-            uses_parentheses=False,
-        )
-
-    @staticmethod
-    def _token_can_start_expression(token: Token) -> bool:
-        return token.token_type in {
-            TokenType.FALSE,
-            TokenType.TRUE,
-            TokenType.NIL,
-            TokenType.NUMBER,
-            TokenType.STRING,
-            TokenType.IDENTIFIER,
-            TokenType.LEFT_PARENTHESIS,
-            TokenType.LEFT_BRACKET,
-            TokenType.LEFT_BRACE,
-            TokenType.MINUS,
-            TokenType.NOT,
-            TokenType.TRY,
-            TokenType.IF,
-            TokenType.WHEN,
-        }
 
     def _parse_equality(self) -> ast.Expression:
         expression = self._parse_comparison()
@@ -1462,8 +1376,7 @@ class Parser:
             opening_parenthesis.location,
             callable_expression,
             arguments,
-            True,
-            block_expression,
+            block=block_expression,
         )
 
     def _parse_primary(self) -> ast.Expression:

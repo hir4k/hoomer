@@ -111,7 +111,7 @@ def _source_needs_more_lines(source_code: str) -> bool:
     A parser error such as a missing ``end`` could mean either “the user is still
     typing” or “the submitted program is malformed.” Counting block delimiters
     lets the REPL distinguish those cases. Keywords inside strings and comments
-    are already hidden by the lexer, so examples like ``print "end"`` do not
+    are already hidden by the lexer, so examples like ``print("end")`` do not
     corrupt the count.
     """
 

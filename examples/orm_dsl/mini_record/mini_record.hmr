@@ -28,8 +28,8 @@ pub fn model(sample_record, table:)
 end
 
 pub fn migrate(model)
-    print "Model {model.name} maps to {model.table}"
-    print "Fields: {model.fields}"
+    print("Model {model.name} maps to {model.table}")
+    print("Fields: {model.fields}")
 end
 
 pub fn create!(model, record)
@@ -43,7 +43,7 @@ pub fn create!(model, record)
         )
     end
 
-    print "Inserted {record_info.name} into {model.table}"
+    print("Inserted {record_info.name} into {model.table}")
     record
 end
 
@@ -69,11 +69,11 @@ pub fn limit(query, count: 100)
 end
 
 pub fn execute(query)
-    print query.statement
+    print(query.statement)
 end
 
 pub fn transaction(&block)
-    print "BEGIN"
+    print("BEGIN")
     block()
-    print "COMMIT"
+    print("COMMIT")
 end

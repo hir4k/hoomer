@@ -21,9 +21,9 @@ fn greeting(name: "World")
     "Hello {name}"
 end
 
-print add(20, 22)
-print greeting()
-print greeting(name: "Hirak")
+print(add(20, 22))
+print(greeting())
+print(greeting(name: "Hirak"))
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -43,13 +43,13 @@ print greeting(name: "Hirak")
 
     def test_parameterless_block_function_may_omit_parentheses(self) -> None:
         source_code = """fn field(name, field_type)
-    print "{name}: {field_type}"
+    print("{name}: {field_type}")
 end
 
 fn change
-    field "name", "string"
-    field "username", "string"
-    field "age", "int"
+    field("name", "string")
+    field("username", "string")
+    field("age", "int")
 end
 
 change()
@@ -71,37 +71,47 @@ end
             "numbers.hmr",
         )
         interpreter.execute_source(
-            "import numbers\nprint Numbers.doubled(21)\n"
+            "import numbers\nprint(Numbers.doubled(21))\n"
         )
 
         self.assertEqual(output.getvalue(), "42\n")
 
-    def test_print_accepts_parenthesized_and_parenthesis_free_calls(self) -> None:
-        _, output, _ = run_hoomer('print("Hello")\nprint "World"\n')
+    def test_print_requires_parentheses(self) -> None:
+        _, output, _ = run_hoomer('print("Hello")\nprint("World")\n')
 
         self.assertEqual(output, "Hello\nWorld\n")
 
-    def test_complete_call_statements_may_omit_parentheses(self) -> None:
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer('print "Hello"\n')
+
+        self.assertIn("requires parentheses", str(caught_error.exception))
+
+    def test_complete_call_statements_require_parentheses(self) -> None:
         source_code = """fn greet(greeting, name, punctuation: "!")
-    print "{greeting} {name}{punctuation}"
+    print("{greeting} {name}{punctuation}")
 end
 
-greet "Hello", "Hirak", punctuation: "?"
+greet("Hello", "Hirak", punctuation: "?")
 """
 
         _, output, _ = run_hoomer(source_code)
 
         self.assertEqual(output, "Hello Hirak?\n")
 
+        with self.assertRaises(ParserError) as caught_error:
+            run_hoomer('greet "Hello", "Hirak"\n')
+
+        self.assertIn("require parentheses", str(caught_error.exception))
+
     def test_struct_construction_cannot_omit_parentheses(self) -> None:
         source_code = """struct User name end
 User name: "Hirak"
 """
 
-        with self.assertRaises(RuntimeHoomerError) as caught_error:
+        with self.assertRaises(ParserError) as caught_error:
             run_hoomer(source_code)
 
-        self.assertIn("always requires parentheses", str(caught_error.exception))
+        self.assertIn("require parentheses", str(caught_error.exception))
 
     def test_struct_fields_are_comma_separated_and_support_one_line_form(self) -> None:
         source_code = """struct Point x, y end
@@ -113,8 +123,8 @@ end
 
 point = Point(x: 3, y: 4)
 user = User(name: "Hirak")
-print point.x + point.y
-print user.age
+print(point.x + point.y)
+print(user.age)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -151,8 +161,8 @@ User("Hirak")
     "{prefix}: {value}{punctuation}"
 end
 
-print describe("Value", value: "ready")
-print describe("Result", value: "done", punctuation: "?")
+print(describe("Value", value: "ready"))
+print(describe("Result", value: "done", punctuation: "?"))
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -262,18 +272,18 @@ user = Accounts.User(name: "Hirak", city: "Guwahati")
 
 when user
     Accounts.User as response:
-        print response.name
+        print(response.name)
     else:
-        print "wrong type"
+        print("wrong type")
 end
 
 when user.city
     "Guwahati":
-        print "local match"
+        print("local match")
     nil:
-        print "missing"
+        print("missing")
     else:
-        print "elsewhere"
+        print("elsewhere")
 end
 """
         )
@@ -294,13 +304,13 @@ database = when result
     DatabaseConnection as connection:
         connection
     DatabaseConnectionFailure as error:
-        print error.message
+        print(error.message)
         nil
     else:
         nil
 end
 
-print database.host
+print(database.host)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -311,7 +321,7 @@ print database.host
         with self.assertRaises(ParserError) as caught_error:
             run_hoomer("""when nil
     nil:
-        print "nil"
+        print("nil")
 end
 """)
 
@@ -328,7 +338,7 @@ end
     end
 end
 
-print describe(42)
+print(describe(42))
 """
         )
 
@@ -339,9 +349,9 @@ print describe(42)
             run_hoomer(
                 """when nil
     else:
-        print "fallback"
+        print("fallback")
     nil:
-        print "unreachable"
+        print("unreachable")
 end
 """
             )
@@ -362,8 +372,8 @@ end
 
 connection = connect!(true) when DatabaseConnection else nil
 missing_connection = connect!(false) when DatabaseConnection else nil
-print connection.host
-print missing_connection
+print(connection.host)
+print(missing_connection)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -376,7 +386,7 @@ struct UserError message end
 
 result = UserError(message: "missing")
 user = result when User else nil
-print user
+print(user)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -392,7 +402,7 @@ fn find_customer!()
 end
 
 customer = find_customer!() when Customer else Customer(name: "Guest")
-print customer.name
+print(customer.name)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -408,7 +418,7 @@ fn find_user!(id)
 end
 
 user = find_user!(10) when User else nil
-print user
+print(user)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -439,12 +449,12 @@ end
 
 probe = Probe()
 found = find_user!(probe, true) when User else guest_user(probe)
-print found.name
-print probe.calls
+print(found.name)
+print(probe.calls)
 
 missing = find_user!(probe, false) when User else guest_user(probe)
-print missing.name
-print probe.calls
+print(missing.name)
+print(probe.calls)
 """
 
         _, output, _ = run_hoomer(source_code)
@@ -463,9 +473,9 @@ print probe.calls
 user = Accounts.User(name: "Hirak") when Accounts.User else nil
 answer = 42 when 42 else 0
 wrong_answer = 41 when 42 else 0
-print user.name
-print answer
-print wrong_answer
+print(user.name)
+print(answer)
+print(wrong_answer)
 """
         )
 
@@ -495,7 +505,7 @@ end
     "saved"
 end
 
-print persist!()
+print(persist!())
 """
         )
         self.assertEqual(output, "saved\n")
@@ -510,7 +520,7 @@ fn forward_user!()
     find_user!()
 end
 
-print forward_user!()
+print(forward_user!())
 """
         )
 
@@ -528,7 +538,7 @@ fn wrapper()
     "done"
 end
 
-print wrapper()
+print(wrapper())
 """
             )
 
@@ -550,7 +560,7 @@ for user in users
     if user.active == false
         continue
     end
-    print user.name
+    print(user.name)
 end
 """
 
@@ -560,11 +570,11 @@ end
 
     def test_for_loop_supports_inclusive_ascending_and_descending_ranges(self) -> None:
         source_code = """for number in 0..3
-    print number
+    print(number)
 end
 
 for number in 2..0
-    print number
+    print(number)
 end
 """
 
@@ -575,7 +585,7 @@ end
     def test_range_bounds_must_be_whole_numbers(self) -> None:
         with self.assertRaises(RuntimeHoomerError) as caught_error:
             run_hoomer("""for number in 0..2.5
-    print number
+    print(number)
 end
 """)
 

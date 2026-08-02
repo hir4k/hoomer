@@ -64,7 +64,6 @@ class CallArgument:
 class CallExpression(Expression):
     callable_expression: Expression
     arguments: list[CallArgument]
-    uses_parentheses: bool = True
     block: Expression | None = None
 
 

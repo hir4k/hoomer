@@ -14,9 +14,9 @@ class StructMatchingReflectionTests(unittest.TestCase):
 end
 
 user = User(age: 26)
-print user.name
+print(user.name)
 user.name = "Hirak"
-print user.name
+print(user.name)
 """
         )
 
@@ -40,9 +40,9 @@ fn describe(value)
     end
 end
 
-print describe(User(name: "Hirak"))
-print describe(nil)
-print describe(42)
+print(describe(User(name: "Hirak")))
+print(describe(nil))
+print(describe(42))
 """
         )
 
@@ -59,9 +59,9 @@ result = DatabaseError(message: "Connection failed")
 
 when result
     DatabaseError as response:
-        print response.message
+        print(response.message)
     else:
-        print "Unexpected"
+        print("Unexpected")
 end
 """
         )
@@ -82,10 +82,10 @@ end
 
 user_info = reflection(User(name: "Hirak"))
 function_info = reflection(greet)
-print user_info.name
-print user_info.fields
-print function_info.name
-print function_info.parameters
+print(user_info.name)
+print(user_info.fields)
+print(function_info.name)
+print(function_info.parameters)
 """
         )
 

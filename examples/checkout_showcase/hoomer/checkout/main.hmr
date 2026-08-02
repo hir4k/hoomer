@@ -132,9 +132,9 @@ fn divider(width)
 end
 
 fn audit(label, &block)
-    print "Audit started: {label}"
+    print("Audit started: {label}")
     block()
-    print "Audit finished: {label}"
+    print("Audit finished: {label}")
 end
 
 pub fn checkout!(
@@ -202,30 +202,30 @@ end
 fn show_result(result)
     when result
         Domain.Receipt as receipt:
-            print "Approved for {receipt.customer_name} ({receipt.customer_level})"
-            print "Subtotal: {receipt.subtotal_cents} cents"
-            print "Discount: {receipt.discount_cents} cents"
-            print "Charged: {receipt.charged_cents} cents"
-            print "Coupon: {describe_coupon(receipt.coupon_code)}"
+            print("Approved for {receipt.customer_name} ({receipt.customer_level})")
+            print("Subtotal: {receipt.subtotal_cents} cents")
+            print("Discount: {receipt.discount_cents} cents")
+            print("Charged: {receipt.charged_cents} cents")
+            print("Coupon: {describe_coupon(receipt.coupon_code)}")
             notification = notify_warehouse!(receipt)
             when notification
                 Domain.NotificationError as error:
-                    print error.message
+                    print(error.message)
                 else:
                     nil
             end
 
         Domain.ValidationError as error:
-            print "Invalid order: {error.message}"
+            print("Invalid order: {error.message}")
 
         Domain.InventoryError as error:
-            print "Not enough {error.product_name}: requested {error.requested}, available {error.available}"
+            print("Not enough {error.product_name}: requested {error.requested}, available {error.available}")
 
         Domain.PaymentError as error:
-            print error.message
+            print(error.message)
 
         else:
-            print "Unexpected checkout result"
+            print("Unexpected checkout result")
     end
 end
 
@@ -233,8 +233,8 @@ fn show_language_metadata(sample_product)
     product_info = reflection(sample_product)
     function_info = reflection(checkout!)
 
-    print "Reflected struct: {product_info.name} {product_info.fields}"
-    print "Reflected function: {function_info.name} {function_info.parameters}"
+    print("Reflected struct: {product_info.name} {product_info.fields}")
+    print("Reflected function: {function_info.name} {function_info.parameters}")
 end
 
 fn main
@@ -261,11 +261,11 @@ fn main
         loyalty_points: 95,
     )
 
-    print divider(42)
-    print "Customer: {customer.name} <{customer.email}>"
+    print(divider(42))
+    print("Customer: {customer.name} <{customer.email}>")
     show_language_metadata(keyboard)
 
-    audit "three checkout attempts" do
+    audit("three checkout attempts") do
         successful_items = [
             Domain.OrderItem(product: keyboard, quantity: 1),
             Domain.OrderItem(product: mouse, quantity: 1),
@@ -277,14 +277,14 @@ fn main
         )
         show_result(successful_result)
 
-        print ""
+        print("")
         unavailable_items = [
             Domain.OrderItem(product: keyboard, quantity: 3),
         ]
         unavailable_result = checkout!(customer, unavailable_items)
         show_result(unavailable_result)
 
-        print ""
+        print("")
         expensive_items = [
             Domain.OrderItem(product: monitor, quantity: 1),
         ]
@@ -301,6 +301,6 @@ fn main
             continue
         end
 
-        print "Tracking update: day {day}"
+        print("Tracking update: day {day}")
     end
 end

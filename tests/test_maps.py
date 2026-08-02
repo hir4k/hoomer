@@ -15,12 +15,12 @@ user = {
     field_name: "hirak@example.com",
 }
 
-print user["name"]
-print user["email"]
-print user["city"]
+print(user["name"])
+print(user["email"])
+print(user["city"])
 
 user["city"] = "Guwahati"
-print user["city"]
+print(user["city"])
 '''
         )
 
@@ -33,8 +33,8 @@ print user["city"]
         _, output, _ = run_hoomer(
             '''values = {"present": nil}
 
-print "present" in values
-print "missing" in values
+print("present" in values)
+print("missing" in values)
 '''
         )
 
@@ -57,9 +57,9 @@ different = {
     "roles": ["admin", "editor"],
 }
 
-print first == second
-print first != different
-print first
+print(first == second)
+print(first != different)
+print(first)
 '''
         )
 
@@ -76,11 +76,11 @@ print first
 }
 
 for name, score in scores
-    print "{name}: {score}"
+    print("{name}: {score}")
 end
 
 for name in scores
-    print name
+    print(name)
 end
 '''
         )
@@ -99,7 +99,7 @@ end
         with self.assertRaises(RuntimeHoomerError) as caught_error:
             run_hoomer(
                 '''for index, value in ["first", "second"]
-    print value
+    print(value)
 end
 '''
             )
@@ -116,7 +116,7 @@ DEFAULTS = {
 }
 
 fn main
-    print DEFAULTS["host"]
+    print(DEFAULTS["host"])
 end
 '''
         )

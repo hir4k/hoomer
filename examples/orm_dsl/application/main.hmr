@@ -15,10 +15,10 @@ end
 fn show_create_error(result)
     when result
         Database.ModelMismatchError as error:
-            print "Model mismatch: {error.table} accepts {error.expected_model}, not {error.received_model}"
+            print("Model mismatch: {error.table} accepts {error.expected_model}, not {error.received_model}")
 
         else:
-            print "Unexpected create result"
+            print("Unexpected create result")
     end
 end
 
@@ -39,7 +39,7 @@ fn main
             ),
         )
         created_user = create_result when User else nil
-        print "Created: {created_user.name}"
+        print("Created: {created_user.name}")
 
         wrong_result = Database.create!(
             user_model,
@@ -48,7 +48,7 @@ fn main
         show_create_error(wrong_result)
 
         filtered_user = wrong_result when User else nil
-        print "Filtered wrong record: {filtered_user}"
+        print("Filtered wrong record: {filtered_user}")
     end
 
     query = Database.all(user_model)
