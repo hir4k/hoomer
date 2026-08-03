@@ -92,7 +92,9 @@ The goal is to create a language where:
 - Common programming tasks require less ceremony.
 - Libraries can create beautiful APIs without changing the language.
 
-Hoomer is a dynamic, interpreted, reflective language focused on simplicity, expressiveness, and developer happiness.
+Hoomer is a dynamic, interpreted, reflective language focused on simplicity,
+expressiveness, and developer happiness. It has no compilation step or static
+type checker.
 
 ---
 
@@ -195,8 +197,10 @@ There are no:
 # 5. Packages
 
 A package is a directory of `.hmr` files that share one semantic namespace.
-Every file starts with the same package header, which extends to EOF and does
-not need a closing `end`.
+The directory name is the package name, with its spelling and case preserved.
+No source declaration is needed: every `.hmr` file directly inside the directory
+automatically belongs to that package. For example, the `accounts` directory is
+the lowercase `accounts` package.
 
 ```text
 kenekoi/
@@ -210,8 +214,6 @@ kenekoi/
 
 ```hmr
 # kenekoi/accounts/user.hmr
-package Accounts
-
 pub struct User
     name,
     email,
@@ -223,13 +225,11 @@ end
 
 ```hmr
 # kenekoi/accounts/authentication.hmr
-package Accounts
-
 import kenekoi/passwords
 
 pub fn login(id, password)
     user = find_user(id)
-    return Passwords.matches(user, password)
+    return passwords.matches(user, password)
 end
 ```
 
@@ -261,9 +261,6 @@ zero-argument `main` function when present. A library package without `main`
 loads successfully without output.
 
 ```hmr
-package Greeting
-
-
 fn main
     print("Hello")
 end
@@ -287,12 +284,12 @@ The shape of a name should tell the reader what it represents.
 
 ## Packages
 
-PascalCase:
+snake_case directory names:
 
 ```text
-Authentication
-LoginService
-DatabaseConnection
+authentication
+login_service
+database_connection
 ```
 
 ---
@@ -412,7 +409,7 @@ end
 Behavior:
 
 ```hmr
-package Users
+# users/user.hmr
 
 fn activate(user)
     user.active = true
@@ -794,9 +791,9 @@ Every import uses a connected, slash-separated `snake_case` package path:
 import kenekoi/accounts
 ```
 
-The imported package's declaration supplies its local name, so this makes
-`Accounts` available. Use `as` when two paths declare the same package name or
-when a clearer local name helps:
+The final directory supplies the local name, so this makes `accounts` available.
+Use `as` when two paths end with the same directory name or when a clearer local
+name helps:
 
 ```hmr
 import accounts as InstalledAccounts
@@ -820,7 +817,7 @@ import ../accounts        # invalid: paths are never relative
 import kenekoi / accounts # invalid: whitespace around `/`
 ```
 
-Imports remain file-scoped. Same-package declarations need no import, while
+Imports remain file-scoped. Sibling declarations need no import, while
 every file using an external package declares that dependency itself:
 
 ```hmr
@@ -972,13 +969,13 @@ info = reflection(user)
 print(info.fields)
 ```
 
-Package reflection separates the declared name from its runtime import identity:
+Package reflection separates the directory name from its runtime import identity:
 
 ```hmr
 import kenekoi/accounts
 
-info = reflection(Accounts)
-print(info.name) # Accounts
+info = reflection(accounts)
+print(info.name) # accounts
 print(info.path) # kenekoi/accounts
 ```
 

@@ -1,5 +1,3 @@
-package FizzBuzz
-
 fn is_divisible(number, divisor)
     if number == 0
         return true

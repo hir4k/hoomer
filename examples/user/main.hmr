@@ -1,13 +1,11 @@
-package User
-
 import examples/example
 
 fn main
-    user = Example.User(
+    user = example.User(
         name: "Hirakjyoti Das 😍",
         age: 26,
     )
 
-    message = Example.greet(user, from: "Baruapara")
+    message = example.greet(user, from: "Baruapara")
     print(message)
 end

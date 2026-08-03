@@ -214,9 +214,7 @@ print(reflection(Int).kind)
             package_directory = root / "greeter"
             package_directory.mkdir()
             (package_directory / "greeter.hmr").write_text(
-                """package Greeter
-
-pub fn greet(name)
+                """pub fn greet(name)
     "Hello {name}"
 end
 """,
@@ -270,16 +268,14 @@ value = wrong()
             package_directory = root / "settings"
             package_directory.mkdir()
             (package_directory / "settings.hmr").write_text(
-                """package Settings
-
-pub PUBLIC_VALUE = 42
+                """pub PUBLIC_VALUE = 42
 PRIVATE_VALUE = 7
 """,
                 encoding="utf-8",
             )
 
             _, output, _ = run_hoomer(
-                "import settings\nprint(Settings.PUBLIC_VALUE)\n",
+                "import settings\nprint(settings.PUBLIC_VALUE)\n",
                 package_search_paths=[root],
             )
 
@@ -287,7 +283,7 @@ PRIVATE_VALUE = 7
 
             with self.assertRaises(RuntimeHoomerError) as private_error:
                 run_hoomer(
-                    "import settings\nvalue = Settings.PRIVATE_VALUE\n",
+                    "import settings\nvalue = settings.PRIVATE_VALUE\n",
                     package_search_paths=[root],
                 )
 

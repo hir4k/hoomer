@@ -64,7 +64,6 @@ class VSCodeExtensionTests(unittest.TestCase):
         self.assertIsNotNone(increase_indent.match("fn answer()"))
         self.assertIsNotNone(increase_indent.match("pub fn answer()"))
         self.assertIsNotNone(increase_indent.match("fn answer(value: 42)"))
-        self.assertIsNone(increase_indent.match("package Accounts"))
 
     def test_grammar_highlights_unquoted_package_import_paths(self) -> None:
         grammar = self._read_json("syntaxes/hoomer.tmLanguage.json")

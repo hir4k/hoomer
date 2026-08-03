@@ -1,5 +1,3 @@
-package Application
-
 import examples/orm_dsl/mini_record as Database
 
 pub struct User

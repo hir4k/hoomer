@@ -25,7 +25,7 @@ python3 -m hoomer.main examples/checkout_showcase/hoomer/checkout
 
 | Idea | Ruby | Hoomer |
 | --- | --- | --- |
-| Namespaces and imports | `module`, `require_relative` | `package`, `import`, `as` |
+| Namespaces and imports | `module`, `require_relative` | package directories, `import`, `as` |
 | Data | `Struct.new`, keyword construction | `struct`, named field construction |
 | Functions | methods, defaults, keywords | `fn`, defaults, named parameters |
 | Visibility | module API | `pub` package API |

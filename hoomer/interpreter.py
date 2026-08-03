@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -130,23 +129,25 @@ class Interpreter:
         )
 
     @staticmethod
-    def _parse_source(source_code: str, file_name: str) -> ast.Program:
+    def _parse_source(
+        source_code: str,
+        file_name: str,
+        *,
+        is_package_file: bool = False,
+    ) -> ast.Program:
         tokens = Lexer(source_code, file_name).scan_tokens()
-        return Parser(tokens).parse()
+        return Parser(tokens, is_package_file=is_package_file).parse()
 
-    def _parse_file(self, resolved_path: Path) -> ast.Program:
+    def _parse_package_file(self, resolved_path: Path) -> ast.Program:
         source_code = resolved_path.read_text(encoding="utf-8")
-        return self._parse_source(source_code, str(resolved_path))
+        return self._parse_source(
+            source_code,
+            str(resolved_path),
+            is_package_file=True,
+        )
 
     def execute_program(self, program: ast.Program) -> object:
         try:
-            if program.package_name is not None:
-                import_path = self._package_name_to_directory_name(program.package_name)
-                return self._install_package_programs(
-                    [program],
-                    import_path=import_path,
-                    source_directory=None,
-                )
             return self.execute_statements(program.statements, self.global_environment)
         except ReturnFromFunction as return_signal:
             # The parser accepts ``return`` wherever a statement may occur so it
@@ -246,8 +247,10 @@ class Interpreter:
                 found=str(package_directory),
             )
 
-        programs = [self._parse_file(source_path) for source_path in source_paths]
-        self._validate_package_files(package_directory, programs)
+        programs = [
+            self._parse_package_file(source_path)
+            for source_path in source_paths
+        ]
 
         if package_directory in self._package_directories_being_loaded:
             raise RuntimeHoomerError(
@@ -265,7 +268,7 @@ class Interpreter:
         )
         if package_comes_from_another_directory:
             raise PackageContentError(
-                programs[0].package_location or location,
+                SourceLocation(str(source_paths[0]), 1, 1),
                 f"Import path `{import_path}` is already defined by another directory.",
                 expected=str(existing_package.source_directory),
                 found=str(package_directory),
@@ -290,59 +293,16 @@ class Interpreter:
 
         return self._invoke_main(runtime_package) if invoke_main else runtime_package
 
-    def _validate_package_files(
-        self,
-        package_directory: Path,
-        programs: list[ast.Program],
-    ) -> None:
-        first_program = programs[0]
-        if first_program.package_name is None:
-            raise PackageContentError(
-                SourceLocation(first_program.statements[0].location.file_name, 1, 1)
-                if first_program.statements
-                else SourceLocation(str(package_directory), 1, 1),
-                "Every .hmr file must begin with a package declaration.",
-                expected="`package PackageName` on the first meaningful line",
-                found="a file without a package declaration",
-            )
-
-        expected_name = first_program.package_name
-        for program in programs[1:]:
-            if program.package_name == expected_name:
-                continue
-            found_name = program.package_name or "no package declaration"
-            raise PackageContentError(
-                program.package_location
-                or SourceLocation(str(package_directory), 1, 1),
-                "Every .hmr file in a directory must declare the same package.",
-                expected="package " + expected_name,
-                found=found_name,
-            )
-
-        expected_directory_name = self._package_name_to_directory_name(expected_name)
-        if package_directory.name.casefold() != expected_directory_name.casefold():
-            raise PackageContentError(
-                first_program.package_location
-                or SourceLocation(str(package_directory), 1, 1),
-                "A package name must agree with its directory name.",
-                expected=expected_directory_name,
-                found=package_directory.name,
-            )
-
     def _install_package_programs(
         self,
         programs: list[ast.Program],
         *,
         import_path: str,
-        source_directory: Path | None,
+        source_directory: Path,
     ) -> RuntimePackage:
-        package_name = programs[0].package_name
-        if package_name is None:
-            raise ValueError("Package programs must have a package declaration.")
-
         self._validate_unique_package_declarations(programs)
         runtime_package = self.package_registry.get_or_create(
-            package_name,
+            source_directory.name,
             import_path,
             source_directory=source_directory,
         )
@@ -1136,7 +1096,7 @@ class Interpreter:
                 raise RuntimeHoomerError(
                     location,
                     f"`{resolved_prefix}` is not a package in this pattern.",
-                    expected="a qualified struct name such as `Accounts.User`",
+                    expected="a qualified struct name such as `accounts.User`",
                     found=runtime_type_name(resolved_value),
                 )
             resolved_value = resolved_value.get_member(member_name, location)
@@ -1711,21 +1671,6 @@ class Interpreter:
     @staticmethod
     def _directory_contains_package(directory: Path) -> bool:
         return directory.is_dir() and any(directory.glob("*.hmr"))
-
-    @staticmethod
-    def _package_name_to_directory_name(package_name: str) -> str:
-        """Map ``LoginService`` to its conventional ``login_service`` directory."""
-
-        words_separated_before_capitals = re.sub(
-            r"(.)([A-Z][a-z]+)",
-            r"\1_\2",
-            package_name,
-        )
-        return re.sub(
-            r"([a-z0-9])([A-Z])",
-            r"\1_\2",
-            words_separated_before_capitals,
-        ).lower()
 
     def _install_builtins(self) -> None:
         for runtime_type in BUILTIN_TYPES:

@@ -1,4 +1,3 @@
-package Example
 pub struct User
     name,
     age,

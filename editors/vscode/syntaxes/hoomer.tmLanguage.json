@@ -100,18 +100,6 @@
     "definitions": {
       "patterns": [
         {
-          "name": "meta.namespace.package.hoomer",
-          "match": "\\b(package)\\s+([A-Z][A-Za-z0-9]*)",
-          "captures": {
-            "1": {
-              "name": "keyword.other.package.hoomer"
-            },
-            "2": {
-              "name": "entity.name.namespace.hoomer"
-            }
-          }
-        },
-        {
           "name": "meta.require.ruby",
           "match": "\\b(import)\\s+([a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:/[a-z][a-z0-9]*(?:_[a-z0-9]+)*)*)",
           "captures": {
@@ -151,10 +139,6 @@
     },
     "keywords": {
       "patterns": [
-        {
-          "name": "keyword.other.package.hoomer",
-          "match": "\\bpackage\\b"
-        },
         {
           "name": "keyword.control.class.ruby",
           "match": "\\b(?:struct|error)\\b"

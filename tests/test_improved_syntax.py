@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 import unittest
 
 from hoomer import ast
@@ -60,19 +61,24 @@ change()
         self.assertEqual(output, "name: string\nusername: string\nage: int\n")
 
     def test_public_function_can_be_called_through_its_package(self) -> None:
-        interpreter, output = Interpreter.capture_output()
-        interpreter.execute_source(
-            """package Numbers
-
-pub fn doubled(number)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_root = Path(temporary_directory)
+            package_directory = package_root / "numbers"
+            package_directory.mkdir()
+            (package_directory / "numbers.hmr").write_text(
+                """pub fn doubled(number)
     number * 2
 end
 """,
-            "numbers.hmr",
-        )
-        interpreter.execute_source(
-            "import numbers\nprint(Numbers.doubled(21))\n"
-        )
+                encoding="utf-8",
+            )
+
+            interpreter, output = Interpreter.capture_output(
+                package_search_paths=[package_root]
+            )
+            interpreter.execute_source(
+                "import numbers\nprint(numbers.doubled(21))\n"
+            )
 
         self.assertEqual(output.getvalue(), "42\n")
 
@@ -254,24 +260,29 @@ end
         )
 
     def test_qualified_struct_and_literal_patterns_match(self) -> None:
-        interpreter, output = Interpreter.capture_output()
-        interpreter.execute_source(
-            """package Accounts
-
-pub struct User
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_root = Path(temporary_directory)
+            package_directory = package_root / "accounts"
+            package_directory.mkdir()
+            (package_directory / "accounts.hmr").write_text(
+                """pub struct User
     name,
     city: nil,
 end
 """,
-            "accounts.hmr",
-        )
-        interpreter.execute_source(
-            """import accounts
+                encoding="utf-8",
+            )
 
-user = Accounts.User(name: "Hirak", city: "Guwahati")
+            interpreter, output = Interpreter.capture_output(
+                package_search_paths=[package_root]
+            )
+            interpreter.execute_source(
+                """import accounts
+
+user = accounts.User(name: "Hirak", city: "Guwahati")
 
 when user
-    Accounts.User as response:
+    accounts.User as response:
         print(response.name)
     else:
         print("wrong type")
@@ -286,7 +297,7 @@ when user.city
         print("elsewhere")
 end
 """
-        )
+            )
 
         self.assertEqual(output.getvalue(), "Hirak\nlocal match\n")
 
@@ -462,22 +473,29 @@ print(probe.calls)
         self.assertEqual(output, "Hirak\n1\nGuest\n3\n")
 
     def test_inline_when_reuses_qualified_and_literal_patterns(self) -> None:
-        interpreter, output = Interpreter.capture_output()
-        interpreter.execute_source(
-            "package Accounts\n\npub struct User name end\n",
-            "accounts.hmr",
-        )
-        interpreter.execute_source(
-            """import accounts
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_root = Path(temporary_directory)
+            package_directory = package_root / "accounts"
+            package_directory.mkdir()
+            (package_directory / "accounts.hmr").write_text(
+                "pub struct User name end\n",
+                encoding="utf-8",
+            )
 
-user = Accounts.User(name: "Hirak") when Accounts.User else nil
+            interpreter, output = Interpreter.capture_output(
+                package_search_paths=[package_root]
+            )
+            interpreter.execute_source(
+                """import accounts
+
+user = accounts.User(name: "Hirak") when accounts.User else nil
 answer = 42 when 42 else 0
 wrong_answer = 41 when 42 else 0
 print(user.name)
 print(answer)
 print(wrong_answer)
 """
-        )
+            )
 
         self.assertEqual(output.getvalue(), "Hirak\n42\n0\n")
 
@@ -594,14 +612,20 @@ end
         self.assertIn("two integers", rendered_error)
 
     def test_private_package_member_requires_pub(self) -> None:
-        interpreter = Interpreter()
-        interpreter.execute_source(
-            "package Accounts\n\nfn internal_helper()\n    \"hidden\"\nend\n",
-            "accounts.hmr",
-        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_root = Path(temporary_directory)
+            package_directory = package_root / "accounts"
+            package_directory.mkdir()
+            (package_directory / "accounts.hmr").write_text(
+                "fn internal_helper()\n    \"hidden\"\nend\n",
+                encoding="utf-8",
+            )
 
-        with self.assertRaises(RuntimeHoomerError) as caught_error:
-            interpreter.execute_source("import accounts\nAccounts.internal_helper()\n")
+            interpreter = Interpreter(package_search_paths=[package_root])
+            with self.assertRaises(RuntimeHoomerError) as caught_error:
+                interpreter.execute_source(
+                    "import accounts\naccounts.internal_helper()\n"
+                )
 
         rendered_error = str(caught_error.exception)
         self.assertIn("private to package", rendered_error)

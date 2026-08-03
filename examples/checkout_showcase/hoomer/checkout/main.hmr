@@ -1,5 +1,3 @@
-package Checkout
-
 import examples/checkout_showcase/hoomer/checkout_domain as Domain
 
 PAYMENT_LIMIT_CENTS = 10000

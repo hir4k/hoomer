@@ -1,5 +1,3 @@
-package Factorial
-
 fn factorial(number)
     if number <= 1
         1

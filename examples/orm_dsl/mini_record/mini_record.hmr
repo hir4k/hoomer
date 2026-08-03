@@ -1,5 +1,3 @@
-package MiniRecord
-
 pub struct Model
     name,
     table,

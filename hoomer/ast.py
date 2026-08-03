@@ -16,8 +16,6 @@ from hoomer.errors import SourceLocation
 @dataclass(slots=True)
 class Program:
     statements: list[Statement]
-    package_name: str | None = None
-    package_location: SourceLocation | None = None
 
 
 @dataclass(slots=True)

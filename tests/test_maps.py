@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 
 from hoomer.errors import RuntimeHoomerError
+from hoomer.interpreter import Interpreter
 from tests.helpers import run_hoomer
 
 
@@ -107,10 +110,11 @@ end
         self.assertIn("Only a map loop", str(caught_error.exception))
 
     def test_package_constant_can_contain_an_inert_map(self) -> None:
-        _, output, _ = run_hoomer(
-            '''package Configuration
-
-DEFAULTS = {
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package_directory = Path(temporary_directory) / "configuration"
+            package_directory.mkdir()
+            (package_directory / "configuration.hmr").write_text(
+                '''DEFAULTS = {
     "host": "localhost",
     "port": 8080,
 }
@@ -118,10 +122,14 @@ DEFAULTS = {
 fn main
     print(DEFAULTS["host"])
 end
-'''
-        )
+''',
+                encoding="utf-8",
+            )
 
-        self.assertEqual(output, "")
+            interpreter, output = Interpreter.capture_output()
+            interpreter.check_package(package_directory)
+
+        self.assertEqual(output.getvalue(), "")
 
 
 if __name__ == "__main__":

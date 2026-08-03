@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Recognize braces used by insertion-ordered map literals and `in` membership.
+- Treat source directories as packages; `package` declarations are no longer
+  language syntax.
 
 ## 0.2.0
 

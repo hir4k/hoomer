@@ -1,5 +1,3 @@
-package CheckoutDomain
-
 pub struct Customer
     name,
     email,

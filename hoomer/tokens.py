@@ -42,7 +42,6 @@ class TokenType(Enum):
     STRING = auto()
     NUMBER = auto()
 
-    PACKAGE = auto()
     IMPORT = auto()
     STRUCT = auto()
     FUNCTION = auto()
@@ -74,7 +73,6 @@ class TokenType(Enum):
 
 
 KEYWORD_TOKEN_TYPES: dict[str, TokenType] = {
-    "package": TokenType.PACKAGE,
     "import": TokenType.IMPORT,
     "struct": TokenType.STRUCT,
     "fn": TokenType.FUNCTION,

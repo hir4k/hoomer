@@ -1,5 +1,3 @@
-package Fibonacci
-
 fn print_fibonacci(remaining, current: 0, next: 1)
     if remaining <= 0
         return

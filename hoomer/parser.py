@@ -9,10 +9,12 @@ from hoomer.errors import PackageContentError, ParserError
 from hoomer.naming import (
     CONSTANT_CASE_PATTERN,
     PASCAL_CASE_PATTERN,
+    SNAKE_CASE_PATTERN,
     validate_field_name,
     validate_function_name,
-    validate_package_name,
+    validate_package_alias,
     validate_package_path_segment,
+    validate_package_reference_name,
     validate_struct_name,
     validate_variable_name,
 )
@@ -22,21 +24,14 @@ from hoomer.tokens import Token, TokenType
 class Parser:
     """Turn tokens into an AST using one method per grammar precedence level."""
 
-    def __init__(self, tokens: list[Token]) -> None:
+    def __init__(self, tokens: list[Token], *, is_package_file: bool = False) -> None:
         self.tokens = tokens
+        self.is_package_file = is_package_file
         self.current_index = 0
 
     def parse(self) -> ast.Program:
         statements: list[ast.Statement] = []
         self._skip_newlines()
-
-        package_name = None
-        package_location = None
-        if self._match(TokenType.PACKAGE):
-            package_token = self._previous()
-            package_name = self._parse_package_header()
-            package_location = package_token.location
-            self._skip_newlines()
 
         while not self._is_at_end():
             statements.append(self._parse_statement())
@@ -44,9 +39,9 @@ class Parser:
             self._skip_newlines()
 
         self._validate_unique_function_names(statements)
-        if package_name is not None:
+        if self.is_package_file:
             self._validate_package_contains_declarations_only(statements)
-        return ast.Program(statements, package_name, package_location)
+        return ast.Program(statements)
 
     def parse_single_expression(self) -> ast.Expression:
         """Parse source used inside ``"...{interpolation}..."``.
@@ -70,14 +65,6 @@ class Parser:
     def _parse_statement(self) -> ast.Statement:
         if self._match(TokenType.PUBLIC):
             return self._parse_public_definition()
-        if self._match(TokenType.PACKAGE):
-            package_token = self._previous()
-            raise ParserError(
-                package_token.location,
-                "A package declaration must be the first meaningful line of its file.",
-                expected="one `package PackageName` header per file",
-                found="another `package` declaration",
-            )
         if self._match(TokenType.IMPORT):
             return self._parse_import(self._previous())
         if self._match(TokenType.STRUCT):
@@ -472,17 +459,6 @@ class Parser:
             is_error,
         )
 
-    def _parse_package_header(self) -> str:
-        name_token = self._consume(
-            TokenType.IDENTIFIER,
-            "Every package file needs a PascalCase name after `package`.",
-            "a PascalCase package name",
-        )
-        validate_package_name(name_token.lexeme, name_token.location)
-
-        self._require_line_after_header("package declaration")
-        return name_token.lexeme
-
     def _validate_package_contains_declarations_only(
         self,
         package_statements: list[ast.Statement],
@@ -654,7 +630,7 @@ class Parser:
                 "an alias name",
             )
             alias = alias_token.lexeme
-            validate_package_name(alias, alias_token.location)
+            validate_package_alias(alias, alias_token.location)
 
         elif self._match(TokenType.COLON):
             self._require_line_after_header("selected import")
@@ -915,7 +891,10 @@ class Parser:
                 "A struct pattern must contain a struct name."
             )
             for package_token in name_tokens[:-1]:
-                validate_package_name(package_token.lexeme, package_token.location)
+                validate_package_reference_name(
+                    package_token.lexeme,
+                    package_token.location,
+                )
             struct_token = name_tokens[-1]
             validate_struct_name(struct_token.lexeme, struct_token.location)
             return ast.StructPattern(
@@ -927,7 +906,7 @@ class Parser:
             self._peek().location,
             "A `when` branch must begin with a struct, literal, `nil`, or `else`.",
             expected=(
-                "a pattern such as `Accounts.User`, `\"Guwahati\"`, `nil`, "
+                "a pattern such as `accounts.User`, `\"Guwahati\"`, `nil`, "
                 "or `else`"
             ),
             found=self._peek().describe(),
@@ -967,16 +946,19 @@ class Parser:
         return self.tokens[token_index].token_type is TokenType.NEWLINE
 
     def _when_struct_pattern_end(self, token_index: int) -> int:
-
         # A qualified type pattern is an alternating sequence such as
-        # ``Accounts . User`` that occupies its whole line. Checking the token
-        # sequence here avoids mistaking ``Accounts.find_user()`` in a branch
+        # ``accounts . User`` that occupies its whole line. Checking the token
+        # sequence here avoids mistaking ``accounts.find_user()`` in a branch
         # body for the beginning of the next pattern.
         expects_identifier = True
         while token_index < len(self.tokens):
             token = self.tokens[token_index]
             if expects_identifier and token.token_type is TokenType.IDENTIFIER:
-                if PASCAL_CASE_PATTERN.fullmatch(token.lexeme) is None:
+                is_package_or_type_name = (
+                    SNAKE_CASE_PATTERN.fullmatch(token.lexeme) is not None
+                    or PASCAL_CASE_PATTERN.fullmatch(token.lexeme) is not None
+                )
+                if not is_package_or_type_name:
                     return self.current_index
                 expects_identifier = False
                 token_index += 1

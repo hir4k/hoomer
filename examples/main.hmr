@@ -1,5 +1,3 @@
-package Examples
-
 pub fn main
     print("Hello, World!")
 end

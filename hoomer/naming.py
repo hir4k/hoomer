@@ -12,12 +12,26 @@ SNAKE_CASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 CONSTANT_CASE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 
 
-def validate_package_name(name: str, location: SourceLocation) -> None:
+def validate_package_alias(name: str, location: SourceLocation) -> None:
     _require_pattern(
         name,
         PASCAL_CASE_PATTERN,
         location,
-        "Package names use PascalCase, for example `Authentication` or `LoginService`.",
+        "Package aliases use PascalCase, for example `Authentication` or `LoginService`.",
+    )
+
+
+def validate_package_reference_name(name: str, location: SourceLocation) -> None:
+    is_directory_name = SNAKE_CASE_PATTERN.fullmatch(name) is not None
+    is_alias = PASCAL_CASE_PATTERN.fullmatch(name) is not None
+    if is_directory_name or is_alias:
+        return
+
+    raise NamingHoomerError(
+        location,
+        "Package references use their snake_case directory name or a PascalCase alias.",
+        expected="a name such as `accounts` or `InstalledAccounts`",
+        found=name,
     )
 
 

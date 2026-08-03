@@ -1,5 +1,3 @@
-package Application
-
 import examples/accounts
 
 pub fn show_user(user)
@@ -10,25 +8,25 @@ pub fn show_user(user)
 end
 
 fn main
-    create_result = Accounts.create_user!(
+    create_result = accounts.create_user!(
         "Hirak",
         "hirak@example.com",
         age: 26,
     )
 
     when create_result
-        Accounts.User as response:
-            message = Accounts.greet(
+        accounts.User as response:
+            message = accounts.greet(
                 response,
                 greeting: "Welcome",
             )
 
             print(message)
 
-        Accounts.ValidationError as response:
+        accounts.ValidationError as response:
             print("Invalid {response.field}: {response.message}")
 
-        Accounts.DatabaseError as response:
+        accounts.DatabaseError as response:
             print("Database error: {response.message}")
 
         nil:
@@ -38,10 +36,10 @@ fn main
             print("Unknown result")
     end
 
-    find_result = Accounts.find_user!(10)
+    find_result = accounts.find_user!(10)
 
     when find_result
-        Accounts.User as user:
+        accounts.User as user:
             show_user(user)
 
             when user.city
@@ -55,10 +53,10 @@ fn main
                     print("User lives somewhere else")
             end
 
-        Accounts.ValidationError as error:
+        accounts.ValidationError as error:
             print(error.message)
 
-        Accounts.DatabaseError as error:
+        accounts.DatabaseError as error:
             print("Database failed with code {error.code}")
 
         nil:
@@ -69,13 +67,13 @@ fn main
     end
 
     users = [
-        Accounts.User(
+        accounts.User(
             name: "Hirak",
             email: "hirak@example.com",
             age: 26,
         ),
 
-        Accounts.User(
+        accounts.User(
             name: "Rahul",
             email: "rahul@example.com",
             age: 16,
@@ -87,6 +85,6 @@ fn main
             continue
         end
 
-        print(Accounts.greet(user))
+        print(accounts.greet(user))
     end
 end

@@ -51,15 +51,12 @@ class LexerTests(unittest.TestCase):
 
     def test_lexer_recognizes_visibility_list_and_loop_tokens(self) -> None:
         tokens = Lexer(
-            "package Accounts\npub for user in [users]\ncontinue\ntry save!()\n"
+            "pub for user in [users]\ncontinue\ntry save!()\n"
         ).scan_tokens()
 
         self.assertEqual(
             [token.token_type for token in tokens],
             [
-                TokenType.PACKAGE,
-                TokenType.IDENTIFIER,
-                TokenType.NEWLINE,
                 TokenType.PUBLIC,
                 TokenType.FOR,
                 TokenType.IDENTIFIER,
@@ -78,6 +75,11 @@ class LexerTests(unittest.TestCase):
                 TokenType.END_OF_FILE,
             ],
         )
+
+    def test_package_is_no_longer_a_keyword(self) -> None:
+        tokens = Lexer("package = \"ordinary name\"\n").scan_tokens()
+
+        self.assertEqual(tokens[0].token_type, TokenType.IDENTIFIER)
 
     def test_question_mark_is_not_part_of_a_function_name(self) -> None:
         with self.assertRaises(LexerError):
